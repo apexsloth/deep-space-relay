@@ -132,8 +132,9 @@ export function createRelay(config: RelayConfig) {
                 chatId = msg.chatId || null;
               }
 
-              pendingResolves.get(msg.correlationId)!(msg);
+              const resolver = pendingResolves.get(msg.correlationId);
               pendingResolves.delete(msg.correlationId);
+              resolver?.(msg);
               continue;
             }
 
@@ -157,8 +158,9 @@ export function createRelay(config: RelayConfig) {
 
               // Resolve pending askPermission call if exists
               if (permissionID && pendingPermissionResolvers.has(permissionID)) {
-                pendingPermissionResolvers.get(permissionID)!(action);
+                const resolver = pendingPermissionResolvers.get(permissionID);
                 pendingPermissionResolvers.delete(permissionID);
+                resolver?.(action);
               }
 
               // Also call legacy callback if exists
@@ -173,8 +175,9 @@ export function createRelay(config: RelayConfig) {
               const selection = msg.selection;
 
               if (askID && pendingAskResolvers.has(askID)) {
-                pendingAskResolvers.get(askID)!(selection);
+                const resolver = pendingAskResolvers.get(askID);
                 pendingAskResolvers.delete(askID);
+                resolver?.(selection);
               }
             }
 
