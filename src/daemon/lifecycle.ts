@@ -247,9 +247,11 @@ export class LifecycleCoordinator extends EventEmitter {
       }, this.heartbeatTimeoutMs);
 
       client.on('connect', () => {
-        if (this.ipcToken) {
-          client.write(JSON.stringify({ type: 'auth', token: this.ipcToken }) + '\n');
-        }
+        // Health check only: send ping without auth.
+        // Our token will never match the old daemon's token, so sending
+        // auth first would cause the old daemon to reject and destroy
+        // the socket before the ping is processed.  The server allows
+        // unauthenticated pings for exactly this purpose.
         client.write(JSON.stringify({ type: 'ping' }) + '\n');
       });
 
