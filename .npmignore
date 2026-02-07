@@ -1,0 +1,8 @@
+src/
+tsconfig.json
+.gitignore
+.npmignore
+# Include dist and README
+!dist/
+!README.md
+!package.json
