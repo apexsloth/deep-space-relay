@@ -1,0 +1,47 @@
+{
+  "name": "deep-space-relay",
+  "version": "0.0.1",
+  "description": "OpenCode Telegram notification plugin - send notifications on session events and expose a notify tool",
+  "author": {
+    "name": "apexsloth"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "dsr": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node && bun build src/daemon.ts --outdir dist --target node && bun build src/cli.ts --outfile dist/cli.js --target node && chmod +x dist/cli.js",
+    "daemon": "bun run src/daemon.ts",
+    "test": "bun test",
+    "lint": "eslint .",
+    "test:integration": "bun test tests/integration.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apexsloth/deep-space-relay.git"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.0.85"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^20.11.5",
+    "bun-types": "latest",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "typescript-eslint": "^8.54.0"
+  }
+}
