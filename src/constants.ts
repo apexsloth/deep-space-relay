@@ -47,6 +47,9 @@ export const SHORT_DELAY_MS = 500;
 /** Medium delay for retry operations (1 second) */
 export const MEDIUM_DELAY_MS = 1000;
 
+/** Delay before retrying a stale leader check when socket exists but connection failed (2 seconds) */
+export const STALE_CHECK_RETRY_DELAY_MS = 2000;
+
 /** Retry delay between connection attempts (100ms) */
 export const RETRY_DELAY_MS = 100;
 

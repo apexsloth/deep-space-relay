@@ -87,7 +87,7 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
           let currentModel: { providerID: string; modelID: string } | undefined;
           let currentAgent: string | undefined;
           try {
-            const result = await client.session.messages({ path: { id: sessionId } });
+            const result = await client.session.messages({ path: { id: sessionId }, query: { directory } });
             const messages = result.data || [];
 
             // Get agent from last user message

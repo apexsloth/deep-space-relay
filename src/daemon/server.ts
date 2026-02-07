@@ -76,6 +76,15 @@ export function createSocketServer(
           const msg = JSON.parse(line);
 
           if (!authenticated) {
+            // Allow ping to bypass auth for leader health checks.
+            // The stale-socket detector (lifecycle.ts) may connect with a
+            // different IPC token; it only needs a pong to know the daemon
+            // is alive.  No sensitive data, no state mutation.
+            if (msg.type === 'ping') {
+              socket.write(JSON.stringify({ type: 'pong', pid: process.pid }) + '\n');
+              continue;
+            }
+
             const authSuccess = msg.token === ipcToken;
             log('[Daemon] Auth attempt: ' + msg.type + ' success: ' + authSuccess, 'debug');
             if (msg.type === 'auth' && authSuccess) {

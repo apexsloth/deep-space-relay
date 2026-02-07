@@ -57,7 +57,7 @@ ${style('Usage:', ANSI.bold)} dsr <command>
 
 ${style('Commands:', ANSI.bold)}
   ${style('setup', ANSI.green)}   Configure bot token and chat ID
-  ${style('start', ANSI.green)}   Start the daemon (foreground)
+  ${style('start', ANSI.green)}   Start the daemon (foreground) [--force]
   ${style('status', ANSI.green)}  Check daemon status
   ${style('stop', ANSI.green)}    Stop the daemon
   ${style('help', ANSI.green)}    Show this help
@@ -192,12 +192,16 @@ async function cmdSetup(): Promise<void> {
   }
 }
 
-async function cmdStart(): Promise<void> {
+async function cmdStart(forceMode = false): Promise<void> {
   // Check system-wide config
   if (!configExists()) {
     console.log(style('Error:', ANSI.red, ANSI.bold) + ' No configuration found.');
     console.log(`Run '${style('dsr setup', ANSI.cyan)}' first to configure your Telegram bot.\n`);
     process.exit(1);
+  }
+
+  if (forceMode) {
+    console.log(style('Force mode enabled', ANSI.yellow) + ' - will take over from existing daemon');
   }
 
   console.log(style('Starting Deep Space Relay daemon...', ANSI.cyan));
@@ -208,6 +212,7 @@ async function cmdStart(): Promise<void> {
       socketPath: SOCKET_PATH,
       statePath: STATE_PATH,
       projectPath: process.cwd(),
+      forceMode,
       onLeader: (reason) => {
         console.log(style('Started as leader', ANSI.green) + ` (${reason})`);
       },
@@ -347,6 +352,8 @@ async function cmdStop(): Promise<void> {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
+  const flags = new Set(args.slice(1));
+  const forceMode = flags.has('--force') || flags.has('-f');
 
   switch (command) {
     case 'setup':
@@ -354,7 +361,7 @@ async function main(): Promise<void> {
       break;
 
     case 'start':
-      await cmdStart();
+      await cmdStart(forceMode);
       break;
 
     case 'status':

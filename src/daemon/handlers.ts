@@ -24,6 +24,44 @@ export interface MessageHandlerContext {
   ) => Promise<number | undefined>;
 }
 
+async function recoverStaleThread(
+  err: any,
+  session: SessionInfo,
+  ctx: MessageHandlerContext,
+  sessionID: string
+): Promise<boolean> {
+  if (!session.threadID) return false;
+
+  const errStr = String(err);
+  const isThreadNotFound = errStr.includes('message thread not found');
+  const chatIdChanged = !!(session.chatId && ctx.chatId && session.chatId !== ctx.chatId);
+
+  // Recover if thread was deleted on Telegram side, OR if the daemon's chatId
+  // changed in config (session still points to the old chat's thread)
+  if (!isThreadNotFound && !chatIdChanged) return false;
+
+  const reason = isThreadNotFound
+    ? 'thread not found'
+    : `chatId changed (${session.chatId} -> ${ctx.chatId})`;
+  log(`[Daemon] Thread ${session.threadID} stale for ${sessionID} (${reason}), recreating`, 'warn');
+
+  // Clear old thread mapping (both composite and legacy keys)
+  ctx.state.threadToSession.delete(`${session.chatId}:${session.threadID}`);
+  ctx.state.threadToSession.delete(String(session.threadID));
+  session.threadID = undefined;
+
+  // Update chatId to current config value if it changed
+  if (chatIdChanged) {
+    log(`[Daemon] Migrating session chatId: ${session.chatId} -> ${ctx.chatId}`, 'info');
+    session.chatId = ctx.chatId;
+  }
+
+  saveState(ctx.state, ctx.statePath);
+  // Create new thread in the (potentially updated) chat
+  await ctx.ensureThread(sessionID, session.project, session.title, session.chatId);
+  return true;
+}
+
 export async function handleRegister(
   msg: any,
   socket: any,
@@ -37,7 +75,7 @@ export async function handleRegister(
     state.clients.set(sid, socket);
     // Use project/title/chatId from message, fallback to existing session values or defaults
     const existing = state.sessions.get(sid);
-    const session = existing || {
+    const session: SessionInfo = existing || {
       sessionID: sid,
       project: msg.project || 'Project',
       title: msg.title || 'Session',
@@ -175,8 +213,12 @@ export async function handleTyping(
           action: 'typing',
         });
       } catch (err) {
-        // Typing indicator is non-critical, log at debug level
-        log(`[Daemon] Failed to send typing indicator: ${err}`, 'debug');
+        // Typing indicator is non-critical; detect stale thread for logging but don't retry
+        if (String(err).includes('message thread not found')) {
+          log(`[Daemon] Typing failed due to stale thread for ${sessionID}, will recover on next send`, 'warn');
+        } else {
+          log(`[Daemon] Failed to send typing indicator: ${err}`, 'debug');
+        }
       }
     }
   }
@@ -251,6 +293,39 @@ export async function handleSend(
       correlationId,
     });
   } catch (err) {
+    // Try to recover from stale thread
+    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
+    if (recovered && session.threadID) {
+      try {
+        const text = session.agentName ? `**[${session.agentName}]:** ${msg.text}` : msg.text;
+        let result = await bot.sendMessage({
+          chat_id: session.chatId,
+          message_thread_id: session.threadID,
+          text,
+          parse_mode: 'Markdown',
+        });
+        if (!result.ok && result.description?.includes("can't parse entities")) {
+          result = await bot.sendMessage({
+            chat_id: session.chatId,
+            message_thread_id: session.threadID,
+            text,
+          });
+        }
+        if (!result.ok) throw new Error(result.description);
+        session.lastMessageID = result.result.message_id;
+        addMessageID(session, result.result.message_id);
+        saveState(state, statePath);
+        sendToClient(state.clients, sessionID, {
+          type: 'sent',
+          success: true,
+          messageID: result.result.message_id,
+          correlationId,
+        });
+        return;
+      } catch (retryErr) {
+        log(`[Daemon] Failed to send after thread recovery: ${retryErr}`, 'error');
+      }
+    }
     log(`[Daemon] Failed to send: ${err}`, 'error');
     sendToClient(state.clients, sessionID, {
       type: 'sent',
@@ -363,6 +438,39 @@ export async function handleReplyTo(
       }) + '\n'
     );
   } catch (err) {
+    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
+    if (recovered && session.threadID) {
+      try {
+        // Retry without reply_to_message_id since old message won't exist in new thread
+        let res = await bot.sendMessage({
+          chat_id: session.chatId,
+          message_thread_id: session.threadID,
+          text: msg.text,
+          parse_mode: 'Markdown',
+        });
+        if (!res.ok && res.description?.includes("can't parse entities")) {
+          res = await bot.sendMessage({
+            chat_id: session.chatId,
+            message_thread_id: session.threadID,
+            text: msg.text,
+          });
+        }
+        if (!res.ok) throw new Error(res.description);
+        addMessageID(session, res.result.message_id);
+        saveState(state, statePath);
+        socket.write(
+          JSON.stringify({
+            type: 'reply_to',
+            success: true,
+            messageID: res.result.message_id,
+            correlationId,
+          }) + '\n'
+        );
+        return;
+      } catch (retryErr) {
+        log(`[Daemon] Failed to reply after thread recovery: ${retryErr}`, 'error');
+      }
+    }
     socket.write(
       JSON.stringify({ type: 'reply_to', success: false, error: String(err), correlationId }) + '\n'
     );
@@ -414,6 +522,23 @@ export async function handleAsk(
     saveState(state, statePath);
     socket.write(JSON.stringify({ type: 'ask_ack', askID, success: true, correlationId }) + '\n');
   } catch (err) {
+    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
+    if (recovered && session.threadID) {
+      try {
+        const res = await bot.sendMessage({
+          chat_id: session.chatId,
+          message_thread_id: session.threadID,
+          text: msg.question,
+          reply_markup: { inline_keyboard },
+        });
+        addMessageID(session, res.result.message_id);
+        saveState(state, statePath);
+        socket.write(JSON.stringify({ type: 'ask_ack', askID, success: true, correlationId }) + '\n');
+        return;
+      } catch (retryErr) {
+        log(`[Daemon] Failed to send ask after thread recovery: ${retryErr}`, 'error');
+      }
+    }
     socket.write(
       JSON.stringify({
         type: 'ask_ack',
@@ -440,7 +565,8 @@ export async function handleDeleteSession(msg: any, socket: any, ctx: MessageHan
       // Thread deletion is non-critical during session cleanup
       log(`[Daemon] Failed to delete thread during session deletion: ${err}`, 'warn');
     }
-    state.threadToSession.delete(session.threadID);
+    state.threadToSession.delete(`${session.chatId}:${session.threadID}`);
+    state.threadToSession.delete(String(session.threadID));
   }
   state.sessions.delete(sid);
   state.clients.delete(sid);
@@ -592,7 +718,34 @@ export async function handlePermissionRequest(
     session.pendingPermissions.set(msg.permissionID, result.result.message_id);
     saveState(state, statePath);
   } catch (err) {
-    // Permission request is non-critical, log at debug level
+    const recovered = await recoverStaleThread(err, session, ctx, sid);
+    if (recovered && session.threadID) {
+      try {
+        const result = await bot.sendMessage({
+          chat_id: session.chatId,
+          message_thread_id: session.threadID,
+          text: `🔒 **Permission Request**\n\n**Tool:** \`${msg.tool}\`\n**Description:** ${msg.description}`,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '✅ Approve', callback_data: `approve:${msg.permissionID}` },
+                { text: '❌ Deny', callback_data: `deny:${msg.permissionID}` },
+              ],
+              [
+                { text: '🛡️ Always', callback_data: `always:${msg.permissionID}` },
+                { text: '🚫 Never', callback_data: `never:${msg.permissionID}` },
+              ],
+            ],
+          },
+        });
+        session.pendingPermissions.set(msg.permissionID, result.result.message_id);
+        saveState(state, statePath);
+        return;
+      } catch (retryErr) {
+        log(`[Daemon] Failed to send permission request after thread recovery: ${retryErr}`, 'error');
+      }
+    }
     log(`[Daemon] Failed to send permission request: ${err}`, 'debug');
   }
 }
@@ -616,6 +769,19 @@ export async function handleErrorNotification(
         text: `⚠️ Error: ${msg.errorName}\n${msg.errorMessage}`,
       });
     } catch (err) {
+      const recovered = await recoverStaleThread(err, session, ctx, sid);
+      if (recovered && session.threadID) {
+        try {
+          await bot.sendMessage({
+            chat_id: session.chatId,
+            message_thread_id: session.threadID,
+            text: `⚠️ Error: ${msg.errorName}\n${msg.errorMessage}`,
+          });
+          return;
+        } catch (retryErr) {
+          log(`[Daemon] Failed to send error notification after thread recovery: ${retryErr}`, 'error');
+        }
+      }
       // Error notifications are non-critical, log at debug level
       log(`[Daemon] Failed to send error notification: ${err}`, 'debug');
     }

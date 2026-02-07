@@ -8,6 +8,7 @@ import {
   MEDIUM_DELAY_MS,
   SHORT_DELAY_MS,
   PARSE_INT_RADIX,
+  STALE_CHECK_RETRY_DELAY_MS,
 } from '../constants';
 
 export type LifecycleState = 'initializing' | 'standby' | 'leading' | 'shutting_down';
@@ -193,10 +194,29 @@ export class LifecycleCoordinator extends EventEmitter {
   }
 
   /**
-   * Check if a leader is currently responding on the socket
-   * Returns true if leader is alive, false if not
+   * Check if a leader is currently responding on the socket.
+   * Uses double-check pattern: if first check fails but socket exists,
+   * waits and retries to avoid false negatives from transient failures.
    */
   public async checkLeaderAlive(): Promise<boolean> {
+    const alive = await this._checkLeaderAliveOnce();
+    if (alive) return true;
+
+    // If socket file exists but leader didn't respond, wait and retry
+    const isPort = /^\d+$/.test(this.socketPath);
+    if (!isPort && existsSync(this.socketPath)) {
+      this.log('debug', 'Leader check failed but socket exists, retrying after delay');
+      await new Promise((r) => setTimeout(r, STALE_CHECK_RETRY_DELAY_MS));
+      return this._checkLeaderAliveOnce();
+    }
+
+    return false;
+  }
+
+  /**
+   * Single attempt to check if leader is alive
+   */
+  private async _checkLeaderAliveOnce(): Promise<boolean> {
     return new Promise((resolve) => {
       if (!this.socketPath) {
         resolve(false);

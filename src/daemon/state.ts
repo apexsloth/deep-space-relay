@@ -124,7 +124,8 @@ export async function cleanupOldSessions(
               chat_id: session.chatId,
               message_thread_id: session.threadID,
             });
-            state.threadToSession.delete(session.threadID);
+            state.threadToSession.delete(`${session.chatId}:${session.threadID}`);
+            state.threadToSession.delete(String(session.threadID));
           } catch (err) {
             log(`[Daemon] Failed to delete thread during auto-cleanup: ${err}`, 'warn');
           }

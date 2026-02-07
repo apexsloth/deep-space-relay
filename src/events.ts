@@ -88,8 +88,18 @@ export function createEventHandler(
     // Session ID can be in different places depending on event type:
     // - message.updated, session.updated: properties.info.sessionID or properties.info.id
     // - session.idle, session.status, session.error: properties.sessionID
-    const sessionId =
+    // Extract raw session ID from event properties
+    const rawSessionId =
       (info?.sessionID as string) || (props?.sessionID as string) || (info?.id as string);
+    // Validate: OpenCode session IDs must start with "ses" (Zod schema enforces this).
+    // The info.id fallback can pick up message IDs or other non-session identifiers.
+    const sessionId = rawSessionId?.startsWith('ses') ? rawSessionId : undefined;
+    if (rawSessionId && !sessionId) {
+      log('Extracted non-session ID from event, ignoring', 'debug', {
+        type: event.type,
+        rawId: rawSessionId,
+      });
+    }
 
     // Log events using the plugin logger
     log('Event received', 'debug', { type: event.type, sessionId, properties: props });
@@ -344,7 +354,8 @@ async function handleSessionUpdated(
   log: LogFn
 ) {
   const newTitle = info?.title as string | undefined;
-  const sessionIdFromInfo = info?.id as string | undefined;
+  const rawId = info?.id as string | undefined;
+  const sessionIdFromInfo = rawId?.startsWith('ses') ? rawId : undefined;
   if (sessionIdFromInfo && newTitle) {
     const r = getRelay(sessionIdFromInfo);
     const state = r.getState();
@@ -399,13 +410,13 @@ async function handleSessionCompacted(
                   ? textPart.text.slice(0, MAX_COMPACTION_SUMMARY_LENGTH) + '...[truncated]'
                   : textPart.text;
               r.sendMessage(`**Session Compacted**\n\n${summary}`).catch((err) => {
-                r.config.log(`Failed to send compaction summary: ${err}`, 'warn');
+                log(`Failed to send compaction summary: ${err}`, 'warn', { sessionId });
               });
               log('Sent compaction summary to Telegram', 'info', { sessionId });
             }
           } else {
             r.sendMessage('Session has been compacted. Context was summarized.').catch((err) => {
-              r.config.log(`Failed to send compaction notice: ${err}`, 'warn');
+              log(`Failed to send compaction notice: ${err}`, 'warn', { sessionId });
             });
           }
         }
