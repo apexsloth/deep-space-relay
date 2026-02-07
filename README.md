@@ -40,7 +40,7 @@ Add the plugin to your `~/.config/opencode/opencode.jsonc`:
 
 ```jsonc
 {
-  "plugins": [
+  "plugin": [
     "deep-space-relay"
   ]
 }
