@@ -265,7 +265,8 @@ export async function handleSend(
   }
 
   try {
-    const text = session.agentName ? `**[${session.agentName}]:** ${msg.text}` : msg.text;
+    // Thread title already shows agent name — no prefix needed for thread messages
+    const text = msg.text;
     let result = await bot.sendMessage({
       chat_id: session.chatId,
       message_thread_id: session.threadID,
@@ -297,7 +298,7 @@ export async function handleSend(
     const recovered = await recoverStaleThread(err, session, ctx, sessionID);
     if (recovered && session.threadID) {
       try {
-        const text = session.agentName ? `**[${session.agentName}]:** ${msg.text}` : msg.text;
+        const text = msg.text;
         let result = await bot.sendMessage({
           chat_id: session.chatId,
           message_thread_id: session.threadID,

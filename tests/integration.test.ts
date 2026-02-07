@@ -88,7 +88,7 @@ describe('Deep Space Relay Integration Tests', () => {
         description: string;
       }>;
       expect(commands).toBeDefined();
-      expect(commands.length).toBe(8); // start, list, list_all, agent, cleanup, compact, help, stop
+      expect(commands.length).toBe(9); // start, list, list_all, agent, cleanup, compact, help, all, stop
 
       // Check each command
       const commandMap = new Map(commands.map((c) => [c.command, c.description]));
@@ -327,7 +327,7 @@ describe('Deep Space Relay Integration Tests', () => {
   });
 
   describe('Agent Name', () => {
-    it('should prepend agent name to messages', async () => {
+    it('should send thread messages without agent name prefix (thread title has it)', async () => {
       const sessionId = 'test-agent-name-001';
       const title = 'Agent Name Test';
 
@@ -341,7 +341,9 @@ describe('Deep Space Relay Integration Tests', () => {
 
       const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
       const lastMessage = messageCalls[messageCalls.length - 1];
-      expect(lastMessage?.params.text).toContain('[TestBot]');
+      // Thread messages should NOT have [Name] prefix — the thread title already shows the agent name
+      expect(lastMessage?.params.text).toBe('Hello with agent name!');
+      expect(lastMessage?.params.message_thread_id).toBeDefined();
     });
   });
 

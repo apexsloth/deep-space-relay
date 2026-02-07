@@ -19,6 +19,7 @@ export async function configureBot(bot: TelegramClient, chatId: string) {
     { command: 'cleanup', description: 'Delete stale threads for closed sessions' },
     { command: 'compact', description: 'Delete this thread (in thread) or thumbs up (global)' },
     { command: 'help', description: 'Show help and workflow ideas' },
+    { command: 'all', description: 'Send a message to ALL connected agents' },
     { command: 'stop', description: 'Stop the current session' },
   ];
 
@@ -360,11 +361,43 @@ export function createMessageHandler(
       return;
     }
 
-    if (!threadId) {
-      // Broadcast only to sessions that belong to this chat
+    // /all <message> — send to ALL connected agents, including threadless ones
+    if (text.startsWith('/all ') && !threadId) {
+      const allText = text.slice(5).trim();
+      if (!allText) return;
+      let sent = 0;
       for (const sid of state.clients.keys()) {
         const session = state.sessions.get(sid);
         if (String(session?.chatId) === String(msgChatId)) {
+          sendToClient(state.clients, sid, {
+            type: 'message',
+            text: allText,
+            isThread: false,
+            messageID: message.message_id,
+          });
+          sent++;
+        }
+      }
+      try {
+        await bot.setMessageReaction({
+          chat_id: msgChatId,
+          message_id: message.message_id,
+          reaction: [{ type: 'emoji', emoji: '\uD83D\uDCE2' }],
+        });
+      } catch (err) {
+        log(`[Commands] Failed to react to /all: ${err}`, 'debug');
+      }
+      log(`[Commands] /all sent to ${sent} agents`, 'info');
+      return;
+    }
+
+    if (!threadId) {
+      // Broadcast only to active sessions (with threads) in this chat.
+      // Agents that haven't started yet (no thread) don't receive General
+      // topic chatter.  Use /all to reach every connected agent.
+      for (const sid of state.clients.keys()) {
+        const session = state.sessions.get(sid);
+        if (String(session?.chatId) === String(msgChatId) && session?.threadID) {
           sendToClient(state.clients, sid, {
             type: 'message',
             text,
