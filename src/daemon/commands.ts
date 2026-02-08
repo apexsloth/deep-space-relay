@@ -22,7 +22,6 @@ export async function configureBot(bot: TelegramClient, chatId: string) {
     { command: 'help', description: 'Show help and workflow ideas' },
     { command: 'all', description: 'Send a message to ALL connected agents' },
     { command: 'stop', description: 'Stop the current session' },
-    { command: 'whoami', description: 'Show your Telegram user ID' },
   ];
 
   const checkResult = (name: string, result: any) => {
@@ -81,8 +80,7 @@ export function createMessageHandler(
   statePath: string,
   configManager: ConfigManager,
   getChatId: () => string,
-  setChatId: (id: string) => void,
-  allowedUsers?: number[]
+  setChatId: (id: string) => void
 ) {
   let botUsername: string | null = null;
   bot
@@ -108,37 +106,6 @@ export function createMessageHandler(
     // Strip bot username suffix (e.g., /list@BotName -> /list)
     if (botUsername && text.includes(`@${botUsername}`)) {
       text = text.replace(`@${botUsername}`, '').trim();
-    }
-
-    // /whoami - always allowed, so users can find their Telegram user ID
-    if (text === '/whoami') {
-      const userId = message.from?.id;
-      const username = message.from?.username;
-      const name = message.from?.first_name;
-      await bot.sendMessage({
-        chat_id: chatId || msgChatId,
-        message_thread_id: threadId,
-        text: [
-          `**Your Telegram Info**`,
-          `**User ID:** \`${userId || 'unknown'}\``,
-          ...(username ? [`**Username:** @${username}`] : []),
-          ...(name ? [`**Name:** ${name}`] : []),
-          ``,
-          `Give this ID to the admin to get access:`,
-          `\`npx deep-space-relay grant ${userId}\``,
-        ].join('\n'),
-        parse_mode: 'Markdown',
-      });
-      return;
-    }
-
-    // Allowlist enforcement: if configured, reject unauthorized users
-    if (allowedUsers && allowedUsers.length > 0) {
-      const userId = message.from?.id;
-      if (!userId || !allowedUsers.includes(userId)) {
-        log(`[Auth] Rejected message from user ${userId || 'unknown'} (not in allowedUsers)`, 'warn');
-        return;
-      }
     }
 
     // Handle rename replies
@@ -521,22 +488,9 @@ export function createMessageHandler(
 export function createCallbackQueryHandler(
   bot: TelegramClient,
   state: DaemonState,
-  statePath: string,
-  allowedUsers?: number[]
+  statePath: string
 ) {
   return async (query: TelegramCallbackQuery) => {
-    // Allowlist enforcement for button clicks
-    if (allowedUsers && allowedUsers.length > 0) {
-      const userId = query.from?.id;
-      if (!userId || !allowedUsers.includes(userId)) {
-        log(`[Auth] Rejected callback from user ${userId || 'unknown'} (not in allowedUsers)`, 'warn');
-        try {
-          await bot.answerCallbackQuery({ callback_query_id: query.id, text: 'Not authorized', show_alert: true });
-        } catch { /* ignore */ }
-        return;
-      }
-    }
-
     const data = query.data || '';
     const parts = data.split(':');
 

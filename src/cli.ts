@@ -13,7 +13,7 @@
 /* eslint-disable no-console */
 
 import { connect, type Socket } from 'node:net';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { setup, UserCancelledError, ANSI, SYSTEM_TOKEN_PATH } from './daemon/setup.ts';
@@ -60,9 +60,6 @@ ${style('Commands:', ANSI.bold)}
   ${style('start', ANSI.green)}   Start the daemon (foreground) [--force]
   ${style('status', ANSI.green)}  Check daemon status
   ${style('stop', ANSI.green)}    Stop the daemon
-  ${style('grant', ANSI.green)}   Grant access: dsr grant <telegram_user_id>
-  ${style('revoke', ANSI.green)}  Revoke access: dsr revoke <telegram_user_id>
-  ${style('users', ANSI.green)}   List allowed users
   ${style('help', ANSI.green)}    Show this help
 
 Run '${style('dsr setup', ANSI.cyan)}' first to configure your Telegram bot.

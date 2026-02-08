@@ -247,9 +247,9 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
       configureBot(bot, chatId).catch((err) => log(`Bot config failed: \${err}`, 'error'));
       bot.on(
         'message',
-        createMessageHandler(bot, state, statePath, configManager, getChatId, setChatId, config.allowedUsers)
+        createMessageHandler(bot, state, statePath, configManager, getChatId, setChatId)
       );
-      bot.on('callback_query', createCallbackQueryHandler(bot, state, statePath, config.allowedUsers));
+      bot.on('callback_query', createCallbackQueryHandler(bot, state, statePath));
       bot.on('message_reaction', createReactionHandler(state));
 
       if (!testMode) {

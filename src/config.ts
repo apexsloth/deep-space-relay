@@ -60,7 +60,6 @@ export interface DSRConfig {
   token?: string;
   chatId?: string;
   ipcToken?: string;
-  allowedUsers?: number[]; // Telegram user IDs allowed to interact with agents
 }
 
 /**
@@ -127,11 +126,6 @@ export function loadConfig(projectPath?: string): DSRConfig {
   }
   if (systemConfig.ipcToken && typeof systemConfig.ipcToken === 'string') {
     config.ipcToken = systemConfig.ipcToken;
-  }
-  if (Array.isArray(systemConfig.allowedUsers)) {
-    config.allowedUsers = systemConfig.allowedUsers.filter(
-      (id: unknown) => typeof id === 'number'
-    );
   }
 
   // Load project-level config (overrides chatId)
