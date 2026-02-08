@@ -266,13 +266,14 @@ export function createRelay(config: RelayConfig) {
     async register(
       sid: string,
       title: string,
-      signal?: AbortSignal | null
+      signal?: AbortSignal | null,
+      parentID?: string
     ): Promise<{ success: boolean; error?: string }> {
       try {
         sessionID = sid;
         currentTitle = title;
         await sendAndWait(
-          { type: 'register', sessionID: sid, project, title, chatId },
+          { type: 'register', sessionID: sid, project, title, chatId, parentID },
           'register',
           'relay/core.ts:register',
           signal
@@ -446,6 +447,16 @@ export function createRelay(config: RelayConfig) {
         return { success: true };
       } catch (err) {
         return { success: false, error: String(err) };
+      }
+    },
+
+    // Update session meta (model, agentType) - fire and forget
+    updateMeta(meta: { model?: string; agentType?: string }): void {
+      if (!registered) return;
+      try {
+        sendToSocket({ type: 'update_meta', ...meta });
+      } catch {
+        // Fire and forget - swallow errors
       }
     },
 

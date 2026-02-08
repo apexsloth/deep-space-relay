@@ -64,6 +64,9 @@ export interface SessionInfo {
   chatId?: string; // Per-session chatId (from plugin)
   threadID?: number;
   agentName?: string;
+  parentID?: string; // Parent session ID (for subagents)
+  model?: string; // e.g. "anthropic/claude-sonnet-4-20250514"
+  agentType?: string; // e.g. "code", "research", "explore"
   status?: 'idle' | 'busy' | 'disconnected';
   disconnectedAt?: number; // Timestamp when session disconnected (for auto-cleanup)
   pendingPermissions: Map<string, number>; // permissionID -> messageID
@@ -110,6 +113,7 @@ export interface TelegramUpdate {
 
 export interface TelegramMessage {
   message_id: number;
+  from?: { id: number; first_name?: string; username?: string };
   text?: string;
   chat: { id: number | string };
   message_thread_id?: number;
@@ -119,6 +123,7 @@ export interface TelegramMessage {
 
 export interface TelegramCallbackQuery {
   id: string;
+  from?: { id: number; first_name?: string; username?: string };
   data?: string;
   message: TelegramMessage;
 }

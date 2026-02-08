@@ -13,7 +13,7 @@
 /* eslint-disable no-console */
 
 import { connect, type Socket } from 'node:net';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { setup, UserCancelledError, ANSI, SYSTEM_TOKEN_PATH } from './daemon/setup.ts';
@@ -60,6 +60,9 @@ ${style('Commands:', ANSI.bold)}
   ${style('start', ANSI.green)}   Start the daemon (foreground) [--force]
   ${style('status', ANSI.green)}  Check daemon status
   ${style('stop', ANSI.green)}    Stop the daemon
+  ${style('grant', ANSI.green)}   Grant access: dsr grant <telegram_user_id>
+  ${style('revoke', ANSI.green)}  Revoke access: dsr revoke <telegram_user_id>
+  ${style('users', ANSI.green)}   List allowed users
   ${style('help', ANSI.green)}    Show this help
 
 Run '${style('dsr setup', ANSI.cyan)}' first to configure your Telegram bot.
@@ -346,6 +349,91 @@ async function cmdStop(): Promise<void> {
 }
 
 // ============================================================
+// GRANT / REVOKE
+// ============================================================
+
+function loadSystemConfig(): Record<string, any> {
+  if (!existsSync(SYSTEM_CONFIG_PATH)) return {};
+  try {
+    return JSON.parse(readFileSync(SYSTEM_CONFIG_PATH, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveSystemConfig(config: Record<string, any>): void {
+  writeFileSync(SYSTEM_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+function cmdGrant(userIdStr: string): void {
+  const userId = parseInt(userIdStr, 10);
+  if (isNaN(userId)) {
+    console.log(style('Error:', ANSI.red, ANSI.bold) + ' User ID must be a number.');
+    console.log(`Tip: users can run ${style('/whoami', ANSI.cyan)} in Telegram to find their ID.`);
+    process.exit(1);
+  }
+
+  const config = loadSystemConfig();
+  const allowed: number[] = Array.isArray(config.allowedUsers) ? config.allowedUsers : [];
+
+  if (allowed.includes(userId)) {
+    console.log(style(`User ${userId} is already allowed.`, ANSI.yellow));
+    return;
+  }
+
+  allowed.push(userId);
+  config.allowedUsers = allowed;
+  saveSystemConfig(config);
+  console.log(style(`Granted access to user ${userId}.`, ANSI.green));
+  console.log(style(`  Allowed users: ${allowed.join(', ')}`, ANSI.dim));
+  console.log(style('  Restart the daemon for changes to take effect.', ANSI.dim));
+}
+
+function cmdRevoke(userIdStr: string): void {
+  const userId = parseInt(userIdStr, 10);
+  if (isNaN(userId)) {
+    console.log(style('Error:', ANSI.red, ANSI.bold) + ' User ID must be a number.');
+    process.exit(1);
+  }
+
+  const config = loadSystemConfig();
+  const allowed: number[] = Array.isArray(config.allowedUsers) ? config.allowedUsers : [];
+
+  const idx = allowed.indexOf(userId);
+  if (idx === -1) {
+    console.log(style(`User ${userId} is not in the allowed list.`, ANSI.yellow));
+    return;
+  }
+
+  allowed.splice(idx, 1);
+  config.allowedUsers = allowed;
+  saveSystemConfig(config);
+  console.log(style(`Revoked access for user ${userId}.`, ANSI.green));
+  if (allowed.length > 0) {
+    console.log(style(`  Allowed users: ${allowed.join(', ')}`, ANSI.dim));
+  } else {
+    console.log(style('  Allowed list is now empty (all users can interact).', ANSI.yellow));
+  }
+  console.log(style('  Restart the daemon for changes to take effect.', ANSI.dim));
+}
+
+function cmdUsers(): void {
+  const config = loadSystemConfig();
+  const allowed: number[] = Array.isArray(config.allowedUsers) ? config.allowedUsers : [];
+
+  if (allowed.length === 0) {
+    console.log(style('No user restrictions configured.', ANSI.yellow));
+    console.log('All Telegram group members can interact with agents.');
+    console.log(`\nTo restrict access: ${style('dsr grant <telegram_user_id>', ANSI.cyan)}`);
+  } else {
+    console.log(style('Allowed users:', ANSI.cyan, ANSI.bold));
+    for (const id of allowed) {
+      console.log(`  ${id}`);
+    }
+  }
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 
@@ -377,6 +465,26 @@ async function main(): Promise<void> {
     case '-h':
     case undefined:
       showHelp();
+      break;
+
+    case 'grant':
+      if (!args[1]) {
+        console.log(style('Usage:', ANSI.bold) + ' dsr grant <telegram_user_id>');
+        process.exit(1);
+      }
+      cmdGrant(args[1]);
+      break;
+
+    case 'revoke':
+      if (!args[1]) {
+        console.log(style('Usage:', ANSI.bold) + ' dsr revoke <telegram_user_id>');
+        process.exit(1);
+      }
+      cmdRevoke(args[1]);
+      break;
+
+    case 'users':
+      cmdUsers();
       break;
 
     default:

@@ -39,6 +39,28 @@ export const AGENT_NAMES = [
 ];
 
 /**
+ * Funny suffixes for subagent names, appended to the parent's name.
+ * e.g. "Mochi Jr." or "Mochi's Shadow"
+ */
+export const SUBAGENT_SUFFIXES = [
+  'Jr.',
+  "'s Shadow",
+  "'s Minion",
+  "'s Sidekick",
+  'Mini',
+  "'s Intern",
+  "'s Clone",
+  "'s Echo",
+  "'s Apprentice",
+  "'s Gremlin",
+  "'s Ghost",
+  "'s Buddy",
+  "'s Spawn",
+  '2.0',
+  "'s Familiar",
+];
+
+/**
  * Generates a random agent name, ensuring it's not already taken.
  * If all names are taken, it appends a random suffix.
  */
@@ -73,14 +95,43 @@ export function getRandomAgentName(state: DaemonState): string {
 }
 
 /**
+ * Generates a subagent name derived from the parent session's name.
+ * Looks up the parent's agentName and appends a random funny suffix.
+ * e.g. "Mochi" -> "Mochi Jr." or "Mochi's Shadow"
+ */
+export function getSubagentName(parentSessionID: string, state: DaemonState): string {
+  const parentSession = state.sessions.get(parentSessionID);
+  const parentName = parentSession?.agentName || 'Agent';
+
+  const takenNames = new Set(
+    Array.from(state.sessions.values())
+      .map((s) => s.agentName?.toLowerCase())
+      .filter(Boolean)
+  );
+
+  // Try each suffix randomly until we find one not taken
+  const shuffled = [...SUBAGENT_SUFFIXES].sort(() => Math.random() - 0.5);
+  for (const suffix of shuffled) {
+    const candidate = `${parentName} ${suffix}`;
+    if (!takenNames.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+
+  // Fallback: append a number
+  return `${parentName} #${Math.floor(Math.random() * RANDOM_SUFFIX_RANGE)}`;
+}
+
+/**
  * Formats a Telegram thread title consistently across the daemon.
+ * Uses session.parentID to determine subagent status (explicit, not heuristic).
  */
 export function formatThreadTitle(
   agentName: string | undefined,
   project: string,
-  title: string
+  title: string,
+  isSubagent = false
 ): string {
-  const isSubagent = /subagent|task/i.test(title);
   let nameTag: string;
   if (isSubagent) {
     nameTag = agentName ? `[🧵 ${agentName}] ` : '[🧵] ';

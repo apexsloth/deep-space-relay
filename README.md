@@ -46,6 +46,10 @@ Add the plugin to your `~/.config/opencode/opencode.jsonc`:
 }
 ```
 
+## Security
+
+**Anyone with access to your Telegram group can control your agents.** Messages sent in a session thread are injected directly into the agent's context -- meaning anyone in the group can instruct the agent to run commands, modify files, or take any action the agent is capable of. Only add people you trust to the Telegram group, and treat group membership as equivalent to shell access on the machine running OpenCode.
+
 ## Commands
 
 *   `npx deep-space-relay status` - Check daemon connection.

@@ -181,11 +181,7 @@ async function handleSessionCreated(
   projectName: string,
   registeringSessions: Set<string>
 ) {
-  // Skip subagents - they have a parentID
-  if (info?.parentID) {
-    log('Skipping subagent session', 'debug', { sessionId, parentID: info.parentID });
-    return;
-  }
+  const parentID = info?.parentID as string | undefined;
 
   // Skip if no sessionId or this session is already registering
   if (!sessionId || registeringSessions.has(sessionId)) {
@@ -196,6 +192,7 @@ async function handleSessionCreated(
     registeringSessions.add(sessionId);
     log('session.created - registering', 'info', {
       sessionID: sessionId,
+      parentID,
       info,
       props,
       eventKeys: Object.keys(event),
@@ -219,28 +216,31 @@ async function handleSessionCreated(
       });
     }
 
-    await r.register(sessionId, title);
-    log('session.created register complete', 'info', { sessionID: sessionId });
+    await r.register(sessionId, title, null, parentID);
+    log('session.created register complete', 'info', { sessionID: sessionId, parentID });
 
-    const welcomeText = `Deep Space Relay is active! 
+    // Only send welcome message to top-level sessions (not subagents)
+    if (!parentID) {
+      const welcomeText = `Deep Space Relay is active! 
 - Use \`dsr_send\` to communicate with the user via Telegram.
 - Incoming messages will be prefixed with [DSR DM (use dsr_send to reply)].
 - **REACTION REQUIRED**: When you receive a message from the user, use \`dsr_react_to\` with a funny emoji (e.g. 🤖, 📺, 📡, 💾) to acknowledge you've read it!
 - **NAME**: You've been assigned a random cult classic name! Use \`dsr_set_agent_name\` if you'd like a different creative name. Be unique to avoid collision with other agents!
 - **TIP**: Multiple short messages are better than one very long text.`;
 
-    client.session
-      .prompt({
-        path: { id: sessionId },
-        body: { parts: [{ type: 'text', text: welcomeText }] },
-        query: { directory },
-      })
-      .catch((err) => {
-        log('Welcome message injection failed', 'warn', {
-          sessionID: sessionId,
-          error: String(err),
+      client.session
+        .prompt({
+          path: { id: sessionId },
+          body: { parts: [{ type: 'text', text: welcomeText }] },
+          query: { directory },
+        })
+        .catch((err) => {
+          log('Welcome message injection failed', 'warn', {
+            sessionID: sessionId,
+            error: String(err),
+          });
         });
-      });
+    }
   } catch (err) {
     log('session.created register error', 'error', { error: String(err) });
   } finally {
@@ -453,6 +453,26 @@ async function handleSessionStatus(
         r.setStatus('busy').catch((err) => {
           log(`Failed to set busy status: ${err}`, 'warn', { sessionId });
         });
+
+        // Fetch model and agent type from session messages (non-blocking)
+        client.session
+          .messages({ path: { id: sessionId }, query: { directory } })
+          .then((result) => {
+            const messages = result.data || [];
+            const lastAssistant = messages.filter((m: any) => m.info?.role === 'assistant').pop();
+            const lastUser = messages.filter((m: any) => m.info?.role === 'user').pop();
+            const model =
+              lastAssistant?.info?.providerID && lastAssistant?.info?.modelID
+                ? `${lastAssistant.info.providerID}/${lastAssistant.info.modelID}`
+                : undefined;
+            const agentType = (lastUser?.info?.agent as string) || undefined;
+            if (model || agentType) {
+              r.updateMeta({ model, agentType });
+            }
+          })
+          .catch((err) => {
+            log('Failed to fetch session meta for model/agent', 'debug', { error: String(err) });
+          });
       } else if (status.type === 'idle') {
         log('Setting status to idle', 'info', { sessionId });
         r.setStatus('idle').catch((err) => {

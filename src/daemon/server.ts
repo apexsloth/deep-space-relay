@@ -17,6 +17,7 @@ import {
   handlePermissionRequest,
   handleErrorNotification,
   handleHealth,
+  handleUpdateMeta,
   type MessageHandlerContext,
 } from './handlers';
 import { MAX_BUFFER_SIZE, AUTH_CHECK_INTERVAL_MS } from '../constants';
@@ -107,7 +108,7 @@ export function createSocketServer(
 
           const chatId = getChatId();
           // Skip logging for high-frequency or internal commands
-          if (msg.type !== 'set_status' && msg.type !== 'ping' && msg.type !== 'auth') {
+          if (msg.type !== 'set_status' && msg.type !== 'update_meta' && msg.type !== 'ping' && msg.type !== 'auth') {
             const sessionRef = msg.sessionID || currentSessionID;
             log(
               `[Daemon] Received command: ${msg.type}${sessionRef ? ` for ${sessionRef}` : ''}`,
@@ -212,6 +213,10 @@ export function createSocketServer(
               await handleSetAgentName(msg, socket, ctx, currentSessionID);
               break;
 
+            case 'update_meta':
+              handleUpdateMeta(msg, ctx, currentSessionID);
+              break;
+
             case 'permission':
             case 'permission_request':
               await handlePermissionRequest(msg, ctx, currentSessionID);
@@ -287,7 +292,8 @@ export async function ensureThread(
       }
 
       const agentName = session?.agentName;
-      const threadName = formatThreadTitle(agentName, project, title);
+      const isSubagent = !!session?.parentID;
+      const threadName = formatThreadTitle(agentName, project, title, isSubagent);
 
       log(
         `[Daemon] Creating thread for ${sessionID} title: ${threadName} chatId: ${chatId}`,

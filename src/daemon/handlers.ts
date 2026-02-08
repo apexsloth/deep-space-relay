@@ -2,7 +2,7 @@ import { log } from './logger';
 import type { TelegramClient } from '../telegram';
 import type { SessionInfo } from '../types';
 import { saveState, sendToClient, type DaemonState } from './state';
-import { AGENT_NAMES, getRandomAgentName, formatThreadTitle, addMessageID } from './utils';
+import { AGENT_NAMES, getRandomAgentName, getSubagentName, formatThreadTitle, addMessageID } from './utils';
 import {
   MS_PER_SECOND,
   SECONDS_PER_MINUTE,
@@ -75,12 +75,16 @@ export async function handleRegister(
     state.clients.set(sid, socket);
     // Use project/title/chatId from message, fallback to existing session values or defaults
     const existing = state.sessions.get(sid);
+    const isSubagent = !!msg.parentID;
     const session: SessionInfo = existing || {
       sessionID: sid,
       project: msg.project || 'Project',
       title: msg.title || 'Session',
       chatId: msg.chatId || chatId, // Per-session chatId, fallback to daemon chatId
-      agentName: getRandomAgentName(state),
+      parentID: msg.parentID, // Track parent for subagents
+      agentName: isSubagent
+        ? getSubagentName(msg.parentID, state)
+        : getRandomAgentName(state),
       pendingPermissions: new Map(),
       pendingAsks: new Map(),
       messageQueue: [],
@@ -94,7 +98,9 @@ export async function handleRegister(
 
     // Ensure even existing unnamed sessions get a name
     if (!session.agentName) {
-      session.agentName = getRandomAgentName(state);
+      session.agentName = session.parentID
+        ? getSubagentName(session.parentID, state)
+        : getRandomAgentName(state);
       if (session.agentName) {
         log(`[Daemon] Assigned random name: ${session.agentName} to ${sid}`, 'info');
         // If thread exists, update it immediately
@@ -103,7 +109,7 @@ export async function handleRegister(
             .editForumTopic({
               chat_id: session.chatId,
               message_thread_id: session.threadID,
-              name: formatThreadTitle(session.agentName, session.project, session.title),
+              name: formatThreadTitle(session.agentName, session.project, session.title, !!session.parentID),
             })
             .catch((err) =>
               log(`[Daemon] Failed to update thread title for new random name: ${err}`, 'error')
@@ -166,7 +172,7 @@ export async function handleUpdateTitle(
         await bot.editForumTopic({
           chat_id: session.chatId,
           message_thread_id: session.threadID,
-          name: formatThreadTitle(session.agentName, session.project, msg.title),
+          name: formatThreadTitle(session.agentName, session.project, msg.title, !!session.parentID),
         });
         session.title = msg.title;
         saveState(state, statePath);
@@ -193,6 +199,32 @@ export async function handleSetStatus(
       session.status = msg.status;
       saveState(state, statePath);
     }
+  }
+}
+
+export function handleUpdateMeta(
+  msg: any,
+  ctx: MessageHandlerContext,
+  currentSessionID: string | null
+) {
+  const { state, statePath } = ctx;
+  const sessionID = msg.sessionID || currentSessionID;
+  if (!sessionID) return;
+  const session = state.sessions.get(sessionID);
+  if (!session) return;
+
+  let changed = false;
+  if (msg.model && typeof msg.model === 'string') {
+    session.model = msg.model;
+    changed = true;
+  }
+  if (msg.agentType && typeof msg.agentType === 'string') {
+    session.agentType = msg.agentType;
+    changed = true;
+  }
+  if (changed) {
+    saveState(state, statePath);
+    log(`[Daemon] Updated meta for ${sessionID}: model=${session.model}, agentType=${session.agentType}`, 'info');
   }
 }
 
@@ -669,7 +701,7 @@ export async function handleSetAgentName(
           await bot.editForumTopic({
             chat_id: session.chatId,
             message_thread_id: session.threadID,
-            name: formatThreadTitle(newName, session.project, session.title),
+            name: formatThreadTitle(newName, session.project, session.title, !!session.parentID),
           });
         } catch (err) {
           log(`[Daemon] Failed to update thread title: ${err}`, 'error');

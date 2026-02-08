@@ -88,7 +88,7 @@ describe('Deep Space Relay Integration Tests', () => {
         description: string;
       }>;
       expect(commands).toBeDefined();
-      expect(commands.length).toBe(9); // start, list, list_all, agent, cleanup, compact, help, all, stop
+      expect(commands.length).toBe(11); // start, list, list_all, agent, name, cleanup, compact, help, all, stop, whoami
 
       // Check each command
       const commandMap = new Map(commands.map((c) => [c.command, c.description]));
@@ -98,7 +98,9 @@ describe('Deep Space Relay Integration Tests', () => {
       expect(commandMap.has('list')).toBe(true);
       expect(commandMap.has('list_all')).toBe(true);
       expect(commandMap.has('agent')).toBe(true);
+      expect(commandMap.has('name')).toBe(true);
       expect(commandMap.has('compact')).toBe(true);
+      expect(commandMap.has('whoami')).toBe(true);
       expect(commandMap.has('help')).toBe(true);
 
       // Verify descriptions are meaningful
@@ -219,51 +221,61 @@ describe('Deep Space Relay Integration Tests', () => {
     });
 
     it('should use thread emoji tag for subagent sessions', async () => {
+      const parentSessionId = 'test-parent-for-sub';
       const sessionId = 'test-subagent-001';
       const title = 'Subagent: File Search';
 
-      await relay.register(sessionId, title);
+      // Register parent first so subagent can derive name
+      await relay.register(parentSessionId, 'Parent Session');
+      await sleep(50);
+      // Register subagent with parentID
+      await relay.register(sessionId, title, null, parentSessionId);
       await relay.send('Test message');
 
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
-      expect(topicCalls.length).toBe(1);
+      // May have 1 or 2 depending on whether parent triggered thread creation
+      const lastTopic = topicCalls[topicCalls.length - 1];
 
       // Subagent should get thread emoji tag [🧵]
-      // (Optional [Name] prefix is OK because daemon assigns random names now)
-      const threadName = topicCalls[0].params.name as string;
+      const threadName = lastTopic.params.name as string;
       expect(threadName).toMatch(/\[\uD83E\uDDF5/);
     });
 
     it('should use thread emoji with name for subagent with agentName', async () => {
+      const parentSessionId = 'test-parent-for-named-sub';
       const sessionId = 'test-subagent-named';
       const title = 'Subagent: Code Analysis';
 
-      await relay.register(sessionId, title);
+      await relay.register(parentSessionId, 'Parent Session');
+      await sleep(50);
+      await relay.register(sessionId, title, null, parentSessionId);
       await relay.setAgentName('Eve');
       await sleep(50);
       await relay.send('Test message');
 
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
-      expect(topicCalls.length).toBe(1);
+      const lastTopic = topicCalls[topicCalls.length - 1];
 
-      // Subagent with name should get [🧵 Name] tag
-      const threadName = topicCalls[0].params.name as string;
+      // Subagent with custom name should get [🧵 Name] tag
+      const threadName = lastTopic.params.name as string;
       expect(threadName).toMatch(/^\[🧵 Eve\]/);
     });
 
     it('should use thread emoji tag for task-type sessions', async () => {
+      const parentSessionId = 'test-parent-for-task';
       const sessionId = 'test-task-001';
       const title = 'Task: Database Migration';
 
-      await relay.register(sessionId, title);
+      await relay.register(parentSessionId, 'Parent Session');
+      await sleep(50);
+      await relay.register(sessionId, title, null, parentSessionId);
       await relay.send('Test message');
 
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
-      expect(topicCalls.length).toBe(1);
+      const lastTopic = topicCalls[topicCalls.length - 1];
 
-      // Task should get thread emoji tag [🧵]
-      // (Optional [Name] prefix is OK because daemon assigns random names now)
-      const threadName = topicCalls[0].params.name as string;
+      // Task (subagent) should get thread emoji tag [🧵]
+      const threadName = lastTopic.params.name as string;
       expect(threadName).toMatch(/\[\uD83E\uDDF5/);
     });
   });

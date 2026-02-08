@@ -16,11 +16,13 @@ export async function configureBot(bot: TelegramClient, chatId: string) {
     { command: 'list', description: 'List active sessions with threads' },
     { command: 'list_all', description: 'List all sessions (including without threads)' },
     { command: 'agent', description: 'Show info / rename current agent' },
+    { command: 'name', description: 'Rename agent: /name <new name>' },
     { command: 'cleanup', description: 'Delete stale threads for closed sessions' },
     { command: 'compact', description: 'Delete this thread (in thread) or thumbs up (global)' },
     { command: 'help', description: 'Show help and workflow ideas' },
     { command: 'all', description: 'Send a message to ALL connected agents' },
     { command: 'stop', description: 'Stop the current session' },
+    { command: 'whoami', description: 'Show your Telegram user ID' },
   ];
 
   const checkResult = (name: string, result: any) => {
@@ -79,7 +81,8 @@ export function createMessageHandler(
   statePath: string,
   configManager: ConfigManager,
   getChatId: () => string,
-  setChatId: (id: string) => void
+  setChatId: (id: string) => void,
+  allowedUsers?: number[]
 ) {
   let botUsername: string | null = null;
   bot
@@ -105,6 +108,37 @@ export function createMessageHandler(
     // Strip bot username suffix (e.g., /list@BotName -> /list)
     if (botUsername && text.includes(`@${botUsername}`)) {
       text = text.replace(`@${botUsername}`, '').trim();
+    }
+
+    // /whoami - always allowed, so users can find their Telegram user ID
+    if (text === '/whoami') {
+      const userId = message.from?.id;
+      const username = message.from?.username;
+      const name = message.from?.first_name;
+      await bot.sendMessage({
+        chat_id: chatId || msgChatId,
+        message_thread_id: threadId,
+        text: [
+          `**Your Telegram Info**`,
+          `**User ID:** \`${userId || 'unknown'}\``,
+          ...(username ? [`**Username:** @${username}`] : []),
+          ...(name ? [`**Name:** ${name}`] : []),
+          ``,
+          `Give this ID to the admin to get access:`,
+          `\`npx deep-space-relay grant ${userId}\``,
+        ].join('\n'),
+        parse_mode: 'Markdown',
+      });
+      return;
+    }
+
+    // Allowlist enforcement: if configured, reject unauthorized users
+    if (allowedUsers && allowedUsers.length > 0) {
+      const userId = message.from?.id;
+      if (!userId || !allowedUsers.includes(userId)) {
+        log(`[Auth] Rejected message from user ${userId || 'unknown'} (not in allowedUsers)`, 'warn');
+        return;
+      }
     }
 
     // Handle rename replies
@@ -290,11 +324,13 @@ export function createMessageHandler(
       }
 
       const msg = [
-        `👤 **Agent Info**`,
+        `**Agent Info**`,
         ``,
         `**Name:** ${session.agentName || 'Unnamed Agent'}`,
         `**Project:** ${session.project}`,
         `**Status:** ${session.status || 'idle'}`,
+        ...(session.model ? [`**Model:** \`${session.model}\``] : []),
+        ...(session.agentType ? [`**Agent:** ${session.agentType}`] : []),
         `**Session ID:** \`${session.sessionID}\``,
       ].join('\n');
       await bot.sendMessage({
@@ -306,6 +342,50 @@ export function createMessageHandler(
           inline_keyboard: [[{ text: '✏️ Rename Agent', callback_data: `trigger_rename:${sid}` }]],
         },
       });
+      return;
+    }
+
+    if (text.startsWith('/name')) {
+      if (!threadId) {
+        await bot.sendMessage({
+          chat_id: chatId,
+          text: `Please use /name inside an agent's thread. Usage: /name <new name>`,
+        });
+        return;
+      }
+      const newName = text.replace('/name', '').trim();
+      if (!newName) {
+        await bot.sendMessage({
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text: 'Usage: `/name <new name>`',
+          parse_mode: 'Markdown',
+        });
+        return;
+      }
+      const sid =
+        state.threadToSession.get(`${msgChatId}:${threadId}`) ||
+        state.threadToSession.get(String(threadId));
+      if (sid) {
+        await handleSetAgentName(
+          { name: newName, sessionID: sid },
+          null,
+          { state, statePath, bot, chatId, ensureThread: async () => undefined },
+          sid
+        );
+        await bot.sendMessage({
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text: `Agent renamed to **${newName}**`,
+          parse_mode: 'Markdown',
+        });
+      } else {
+        await bot.sendMessage({
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text: 'No session found for this thread.',
+        });
+      }
       return;
     }
 
@@ -329,7 +409,7 @@ export function createMessageHandler(
         : chatId;
       for (const [sid, session] of sessionsToShow) {
         const isConnected = state.clients.has(sid);
-        const prefix = /subagent|task/i.test(session.title) ? '\uD83E\uDDF5' : '';
+        const prefix = session.parentID ? '\uD83E\uDDF5' : '';
         const status = isConnected ? '\uD83D\uDFE2' : '\uD83D\uDC7B';
         const agentName = session.agentName || 'Agent';
         const safeProject = session.project || 'unknown';
@@ -441,9 +521,22 @@ export function createMessageHandler(
 export function createCallbackQueryHandler(
   bot: TelegramClient,
   state: DaemonState,
-  statePath: string
+  statePath: string,
+  allowedUsers?: number[]
 ) {
   return async (query: TelegramCallbackQuery) => {
+    // Allowlist enforcement for button clicks
+    if (allowedUsers && allowedUsers.length > 0) {
+      const userId = query.from?.id;
+      if (!userId || !allowedUsers.includes(userId)) {
+        log(`[Auth] Rejected callback from user ${userId || 'unknown'} (not in allowedUsers)`, 'warn');
+        try {
+          await bot.answerCallbackQuery({ callback_query_id: query.id, text: 'Not authorized', show_alert: true });
+        } catch { /* ignore */ }
+        return;
+      }
+    }
+
     const data = query.data || '';
     const parts = data.split(':');
 
