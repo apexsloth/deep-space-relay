@@ -335,6 +335,26 @@ describe('Deep Space Relay Integration Tests', () => {
       expect(broadcastCall).toBeDefined();
       expect(broadcastCall?.params.text).toContain('Broadcasting to all!');
     });
+
+    it('should not add fallback agent prefix to broadcasts when no name is set', async () => {
+      // Create a relay with no agent name set yet (freshly registered gets a random name,
+      // so we test that the prefix uses the actual name, not a hardcoded fallback)
+      const sessionId = 'test-broadcast-no-fallback-001';
+      const title = 'Broadcast Prefix Test';
+
+      await relay.register(sessionId, title);
+
+      const broadcastResult = await relay.broadcast('No fallback prefix');
+      expect(broadcastResult.success).toBe(true);
+
+      const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
+      const broadcastCall = messageCalls.find(
+        (c) => !c.params.message_thread_id && (c.params.text as string).includes('No fallback prefix')
+      );
+      expect(broadcastCall).toBeDefined();
+      // Should NOT contain the hardcoded '[Agent]:' fallback
+      expect(broadcastCall?.params.text).not.toContain('[Agent]:');
+    });
   });
 
   describe('Agent Name', () => {
@@ -844,6 +864,29 @@ describe('Deep Space Relay Integration Tests', () => {
 
       const state = relay.getState();
       expect(state.title).toBe('New Title');
+    });
+
+    it('should sync thread title when re-registering with a new title', async () => {
+      const sessionId = 'test-reregister-title-001';
+      const title = 'Original Title';
+
+      await relay.register(sessionId, title);
+      await relay.send('Create thread');
+
+      // Clear calls to distinguish re-register edits
+      mockTelegram.calls.length = 0;
+
+      // Re-register with a new title
+      const relay2 = createTestRelay(daemon.socketPath);
+      await relay2.register(sessionId, 'Brand New Title');
+
+      await sleep(100);
+
+      // Verify editForumTopic was called with the new title
+      const editCalls = findCalls(mockTelegram.calls, 'editForumTopic');
+      expect(editCalls.length).toBeGreaterThan(0);
+      const lastEditCall = editCalls[editCalls.length - 1];
+      expect(lastEditCall.params.name as string).toContain('Brand New Title');
     });
   });
 

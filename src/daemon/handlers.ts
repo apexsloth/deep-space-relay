@@ -119,11 +119,27 @@ export async function handleRegister(
     }
 
     // Update project/title/chatId if provided (allows re-registration with new values)
+    // Track whether title/project changed so we can sync the Telegram thread title
+    const titleChanged = msg.title && msg.title !== session.title;
+    const projectChanged = msg.project && msg.project !== session.project;
     if (msg.project) session.project = msg.project;
     if (msg.title) session.title = msg.title;
     if (msg.chatId) session.chatId = msg.chatId;
     if (!state.sessions.has(sid)) state.sessions.set(sid, session);
     saveState(state, statePath);
+
+    // Sync Telegram thread title if project or title changed on re-register
+    if ((titleChanged || projectChanged) && session.threadID && session.chatId) {
+      bot
+        .editForumTopic({
+          chat_id: session.chatId,
+          message_thread_id: session.threadID,
+          name: formatThreadTitle(session.agentName, session.project, session.title, !!session.parentID),
+        })
+        .catch((err) =>
+          log(`[Daemon] Failed to sync thread title on re-register: ${err}`, 'error')
+        );
+    }
 
     if (!session.chatId) {
       log(
@@ -401,7 +417,7 @@ export async function handleBroadcast(
   }
 
   try {
-    const namePart = `**[${session.agentName || 'Agent'}]:** `;
+    const namePart = session.agentName ? `**[${session.agentName}]:** ` : '';
     let text = `${namePart}${msg.text}`;
 
     let result = await bot.sendMessage({ chat_id: session.chatId, text, parse_mode: 'Markdown' });
