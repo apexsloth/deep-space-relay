@@ -46,6 +46,16 @@ export interface PluginContext {
           parts?: Array<{ type: string; text?: string }>;
         }>;
       }>;
+      list: (options?: {
+        query?: { directory?: string };
+      }) => Promise<{
+        data?: Array<{
+          id: string;
+          title: string;
+          parentID?: string;
+          time: { created: number; updated: number };
+        }>;
+      }>;
     };
   };
 }

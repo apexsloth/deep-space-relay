@@ -152,6 +152,51 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
   const tools = createTools(getRelay, log, relays, client, directory);
   const eventHandler = createEventHandler(getRelay, log, client, directory, projectName);
 
+  // Auto-connect: register all existing sessions with the daemon on startup.
+  // This enables Telegram → agent messaging for resumed sessions without
+  // waiting for the agent to speak first (which normally triggers registration).
+  // Fire-and-forget so it doesn't block plugin initialization.
+  (async () => {
+    try {
+      const result = await client.session.list({ query: { directory } });
+      const sessions = result.data || [];
+      // Only connect top-level sessions (not subagents), skip already-registered
+      const candidates = sessions.filter(
+        (s) => s.id?.startsWith('ses') && !s.parentID && !relays.has(s.id)
+      );
+      if (candidates.length === 0) {
+        log('Auto-connect: no existing sessions to connect', 'debug');
+        return;
+      }
+      log('Auto-connect: registering existing sessions', 'info', {
+        count: candidates.length,
+        sessionIDs: candidates.map((s) => s.id),
+      });
+      for (const session of candidates) {
+        try {
+          const r = getRelay(session.id);
+          const title = session.title || `Session ${session.id.slice(-8)}`;
+          await r.register(session.id, title);
+          log('Auto-connect: registered session', 'info', {
+            sessionID: session.id,
+            title,
+          });
+        } catch (err) {
+          // Non-fatal: daemon might not be running, socket might not exist
+          log('Auto-connect: failed to register session', 'debug', {
+            sessionID: session.id,
+            error: String(err),
+          });
+        }
+      }
+    } catch (err) {
+      // Non-fatal: session list API might not be available
+      log('Auto-connect: failed to list sessions', 'debug', {
+        error: String(err),
+      });
+    }
+  })();
+
   return {
     tool: tools,
     event: eventHandler,
