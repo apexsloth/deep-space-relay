@@ -88,7 +88,7 @@ describe('Deep Space Relay Integration Tests', () => {
         description: string;
       }>;
       expect(commands).toBeDefined();
-      expect(commands.length).toBe(11); // start, list, list_all, agent, name, cleanup, compact, help, all, stop, whoami
+      expect(commands.length).toBe(10); // start, list, list_all, agent, name, cleanup, compact, help, all, stop
 
       // Check each command
       const commandMap = new Map(commands.map((c) => [c.command, c.description]));
@@ -100,7 +100,6 @@ describe('Deep Space Relay Integration Tests', () => {
       expect(commandMap.has('agent')).toBe(true);
       expect(commandMap.has('name')).toBe(true);
       expect(commandMap.has('compact')).toBe(true);
-      expect(commandMap.has('whoami')).toBe(true);
       expect(commandMap.has('help')).toBe(true);
 
       // Verify descriptions are meaningful
