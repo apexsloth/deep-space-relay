@@ -57,6 +57,13 @@ export interface PluginContext {
         }>;
       }>;
     };
+    // Top-level method on OpencodeClient for responding to permission requests
+    // Used by the permission.ask hook to respond from Telegram
+    postSessionIdPermissionsPermissionId: (options: {
+      path: { id: string; permissionID: string };
+      body?: { response: string };
+      query?: { directory?: string };
+    }) => Promise<{ data?: boolean }>;
   };
 }
 

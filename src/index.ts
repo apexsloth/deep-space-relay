@@ -5,6 +5,7 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { createRelay, type Relay } from './relay/index';
 import { createTools } from './tools';
 import { createEventHandler } from './events';
+import { createPermissionHandler } from './permissions';
 import { loadConfig, getSystemConfigDir, getSocketPath } from './config';
 import type { PluginContext, LogFn } from './types';
 
@@ -151,6 +152,7 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
   // Create tools and event handler using factory functions
   const tools = createTools(getRelay, log, relays, client, directory);
   const eventHandler = createEventHandler(getRelay, log, client, directory, projectName);
+  const permissionHandler = createPermissionHandler(getRelay, log, relays, client, directory);
 
   // Auto-connect is DISABLED for now.
   // The session.list API returns all sessions for the directory, but there's no
@@ -163,6 +165,7 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
   return {
     tool: tools,
     event: eventHandler,
+    'permission.ask': permissionHandler,
   };
 };
 
