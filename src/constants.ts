@@ -122,6 +122,9 @@ export const KB_PER_MB = 1024;
 /** Milliseconds per day */
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/** Maximum age for auto-connect sessions (24 hours) */
+export const AUTO_CONNECT_MAX_AGE_MS = MS_PER_DAY;
+
 /** Days to keep disconnected sessions before auto-cleanup (7 days) */
 export const SESSION_CLEANUP_DAYS = 7;
 

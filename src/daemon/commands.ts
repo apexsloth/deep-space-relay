@@ -359,7 +359,11 @@ export function createMessageHandler(
     if (text === '/list' || text === '/list_all') {
       log(`[Daemon] Processing ${text} command`, 'info');
       const showAll = text === '/list_all';
-      const sessionsWithThreads = [...state.sessions.entries()].filter(([_, s]) => s.threadID);
+      // /list: only main agents (no subagents) with threads
+      // /list_all: everything including subagents and threadless sessions
+      const sessionsWithThreads = [...state.sessions.entries()].filter(
+        ([_, s]) => s.threadID && !s.parentID
+      );
       const sessionsToShow = showAll ? [...state.sessions.entries()] : sessionsWithThreads;
 
       if (sessionsToShow.length === 0) {
@@ -370,7 +374,7 @@ export function createMessageHandler(
         return;
       }
 
-      const lines = [showAll ? 'All Agent Sessions:' : 'Active Sessions (with threads):', ''];
+      const lines = [showAll ? 'All Agent Sessions:' : 'Active Agents:', ''];
       const strippedChatId = chatId.startsWith('-100')
         ? chatId.slice(TELEGRAM_CHAT_ID_PREFIX_LENGTH)
         : chatId;
@@ -392,9 +396,10 @@ export function createMessageHandler(
       }
 
       if (!showAll && state.sessions.size > sessionsWithThreads.length) {
+        const hiddenCount = state.sessions.size - sessionsWithThreads.length;
         lines.push(
           '',
-          `${state.sessions.size - sessionsWithThreads.length} sessions without threads. Use /list_all to see all.`
+          `${hiddenCount} more session(s) hidden (subagents / no thread). Use /list_all to see all.`
         );
       }
 
@@ -439,12 +444,16 @@ export function createMessageHandler(
     }
 
     if (!threadId) {
-      // Broadcast only to active sessions (with threads) in this chat.
-      // Agents that haven't started yet (no thread) don't receive General
-      // topic chatter.  Use /all to reach every connected agent.
+      // Broadcast only to active main agents (with threads, no subagents) in this chat.
+      // Subagents don't receive General topic chatter.
+      // Use /all to reach every connected agent including subagents.
       for (const sid of state.clients.keys()) {
         const session = state.sessions.get(sid);
-        if (String(session?.chatId) === String(msgChatId) && session?.threadID) {
+        if (
+          String(session?.chatId) === String(msgChatId) &&
+          session?.threadID &&
+          !session?.parentID
+        ) {
           sendToClient(state.clients, sid, {
             type: 'message',
             text,

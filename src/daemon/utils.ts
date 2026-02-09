@@ -125,6 +125,10 @@ export function getSubagentName(parentSessionID: string, state: DaemonState): st
 /**
  * Formats a Telegram thread title consistently across the daemon.
  * Uses session.parentID to determine subagent status (explicit, not heuristic).
+ *
+ * Format: "[AgentName] title" or "[AgentName] project: title"
+ * - Omits project prefix when title equals project name (avoids "proj: proj")
+ * - Omits project prefix when title already contains the project name
  */
 export function formatThreadTitle(
   agentName: string | undefined,
@@ -138,7 +142,16 @@ export function formatThreadTitle(
   } else {
     nameTag = agentName ? `[${agentName}] ` : '';
   }
-  return `${nameTag}${project}: ${title}`.trim();
+
+  // Skip project prefix if title IS the project name or already contains it
+  const titleLower = title.toLowerCase();
+  const projectLower = project.toLowerCase();
+  const skipProject =
+    titleLower === projectLower ||
+    titleLower.includes(projectLower);
+
+  const body = skipProject ? title : `${project}: ${title}`;
+  return `${nameTag}${body}`.trim();
 }
 
 /**
