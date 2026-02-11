@@ -292,8 +292,8 @@ export class LifecycleCoordinator extends EventEmitter {
   }
 
   public cleanupSocket() {
-    if (this.state === 'standby') {
-      this.log('debug', 'Skipping socket cleanup: in standby state');
+    if (this.state !== 'leading') {
+      this.log('debug', `Skipping socket cleanup: state is ${this.state} (not leading)`);
       return;
     }
     if (!/^\d+$/.test(this.socketPath) && existsSync(this.socketPath)) {

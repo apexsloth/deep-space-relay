@@ -282,24 +282,32 @@ export function createMessageHandler(
         // Ignore
       }
 
-      const idsToDelete = session.messageIDs.slice(0, -limit).filter(id => id !== session.statusMessageID);
+      const totalCount = session.messageIDs.length;
+      const idsToDelete = totalCount > limit 
+        ? session.messageIDs.slice(0, totalCount - limit).filter(id => id !== session.statusMessageID)
+        : [];
+
       let deletedCount = 0;
       
-      // Attempt to delete messages
-      for (const id of idsToDelete) {
-        try {
-          const res = await bot.deleteMessage({ chat_id: msgChatId, message_id: id });
-          if (res.ok) {
-            deletedCount++;
+      // Attempt to delete messages in parallel batches to speed up while staying rate-limit safe
+      const batchSize = 5;
+      for (let i = 0; i < idsToDelete.length; i += batchSize) {
+        const batch = idsToDelete.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (id) => {
+          try {
+            const res = await bot.deleteMessage({ chat_id: msgChatId, message_id: id });
+            if (res.ok) {
+              deletedCount++;
+            }
+          } catch (err) {
+            // Detect 48h limit error: "message can't be deleted for everyone"
+            if (String(err).includes("can't be deleted")) {
+              log(`[Commands] Message ${id} too old to delete`, 'debug');
+            } else {
+              log(`[Commands] Failed to delete message ${id}: ${err}`, 'debug');
+            }
           }
-        } catch (err) {
-          // Detect 48h limit error: "message can't be deleted for everyone"
-          if (String(err).includes("can't be deleted")) {
-            log(`[Commands] Message ${id} too old to delete`, 'debug');
-          } else {
-            log(`[Commands] Failed to delete message ${id}: ${err}`, 'debug');
-          }
-        }
+        }));
       }
 
       // Update session message IDs
