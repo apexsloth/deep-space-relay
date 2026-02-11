@@ -56,6 +56,16 @@ export interface PluginContext {
           time: { created: number; updated: number };
         }>;
       }>;
+      shell: (options: {
+        path: { id: string };
+        body: { command: string };
+        query: { directory: string };
+      }) => Promise<unknown>;
+      revert: (options: { path: { id: string }; query: { directory: string } }) => Promise<unknown>;
+      unrevert: (options: {
+        path: { id: string };
+        query: { directory: string };
+      }) => Promise<unknown>;
     };
     // Top-level method on OpencodeClient for responding to permission requests
     // Used by the permission.ask hook to respond from Telegram
@@ -101,6 +111,8 @@ export interface RelayConfig {
   chatId?: string; // Per-session chatId (from project config)
   log: LogFn;
   onMessage?: (text: string, isThread: boolean, messageID?: number) => void;
+  onCommand?: (command: string, messageID?: number) => void;
+  onShell?: (command: string, messageID?: number) => void;
   onPermissionResponse?: (permissionID: string, action: string) => void;
   onStop?: () => void;
   socketPath?: string; // Optional override for testing
@@ -187,4 +199,16 @@ export interface PermissionMessage extends SocketMessage {
   permissionID: string;
   tool: string;
   description?: string;
+}
+
+export interface ShellMessage extends SocketMessage {
+  type: 'shell';
+  command: string;
+  messageID?: number;
+}
+
+export interface CommandMessage extends SocketMessage {
+  type: 'command';
+  command: string;
+  messageID?: number;
 }

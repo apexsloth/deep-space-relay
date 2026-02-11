@@ -477,6 +477,61 @@ export function createMessageHandler(
         if (session) {
           session.lastMessageID = message.message_id;
           addMessageID(session, message.message_id);
+
+          // Handle bang commands (!ls)
+          if (text.startsWith('!')) {
+            const shellCmd = text.slice(1).trim();
+            if (shellCmd) {
+              log(`[Commands] Forwarding shell command to client: ${shellCmd}`, 'info', { sid });
+              if (
+                sendToClient(state.clients, sid, {
+                  type: 'shell',
+                  command: shellCmd,
+                  messageID: message.message_id,
+                })
+              ) {
+                try {
+                  await bot.setMessageReaction({
+                    chat_id: msgChatId,
+                    message_id: message.message_id,
+                    reaction: [{ type: 'emoji', emoji: '⌛' }],
+                  });
+                } catch (err) {
+                  log(`[Commands] Failed to react to shell cmd: ${err}`, 'debug');
+                }
+                return;
+              } else {
+                log(`[Commands] Failed to forward shell command: no connected client for ${sid}`, 'warn');
+              }
+            }
+          }
+
+          // Handle undo/redo pass-through
+          if (text === '/undo' || text === '/redo') {
+            const cmd = text.slice(1);
+            log(`[Commands] Forwarding ${cmd} command to client`, 'info', { sid });
+            if (
+              sendToClient(state.clients, sid, {
+                type: 'command',
+                command: cmd,
+                messageID: message.message_id,
+              })
+            ) {
+              try {
+                await bot.setMessageReaction({
+                  chat_id: msgChatId,
+                  message_id: message.message_id,
+                  reaction: [{ type: 'emoji', emoji: '↩️' }],
+                });
+              } catch (err) {
+                log(`[Commands] Failed to react to ${text}: ${err}`, 'debug');
+              }
+              return;
+            } else {
+              log(`[Commands] Failed to forward ${cmd} command: no connected client for ${sid}`, 'warn');
+            }
+          }
+
           if (
             !sendToClient(state.clients, sid, {
               type: 'message',

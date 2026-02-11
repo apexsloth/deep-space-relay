@@ -128,6 +128,30 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
               });
             });
         },
+        onCommand: async (command, messageID) => {
+          log('Received command pass-through from Telegram', 'info', { sessionId, command });
+          try {
+            if (command === 'undo') {
+              await client.session.revert({ path: { id: sessionId }, query: { directory } });
+            } else if (command === 'redo') {
+              await client.session.unrevert({ path: { id: sessionId }, query: { directory } });
+            }
+          } catch (err) {
+            log('Command execution failed', 'warn', { sessionId, command, error: String(err) });
+          }
+        },
+        onShell: async (command, messageID) => {
+          log('Received shell pass-through from Telegram', 'info', { sessionId, command });
+          try {
+            await client.session.shell({
+              path: { id: sessionId },
+              body: { command },
+              query: { directory },
+            });
+          } catch (err) {
+            log('Shell execution failed', 'warn', { sessionId, command, error: String(err) });
+          }
+        },
         onStop: () => {
           // User sent /stop from Telegram - abort the session
           log('Received /stop from Telegram, aborting session', 'info', { sessionID: sessionId });

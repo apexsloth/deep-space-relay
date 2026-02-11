@@ -45,6 +45,7 @@ export function createRelay(config: RelayConfig) {
   let lastMessageID: number | undefined;
   let currentTitle: string | undefined;
   let chatId: string | null = configChatId || null;
+  let lastMeta: string = '';
   const pendingResolves = new Map<string, (value: any) => void>();
   const pendingPermissionResolvers = new Map<string, (response: string) => void>();
   let buffer = '';
@@ -149,6 +150,18 @@ export function createRelay(config: RelayConfig) {
               // If we receive a thread message, the thread exists - update state
               if (msg.isThread) hasThread = true;
               onMessage(msg.text, msg.isThread ?? false, msg.messageID);
+            }
+
+            // Handle incoming commands from Telegram (/undo, /redo)
+            if (msg.type === 'command' && msg.command && config.onCommand) {
+              if (msg.messageID) lastMessageID = msg.messageID;
+              config.onCommand(msg.command, msg.messageID);
+            }
+
+            // Handle incoming shell commands from Telegram (!ls)
+            if (msg.type === 'shell' && msg.command && config.onShell) {
+              if (msg.messageID) lastMessageID = msg.messageID;
+              config.onShell(msg.command, msg.messageID);
             }
 
             // Handle permission responses from Telegram buttons
@@ -453,6 +466,10 @@ export function createRelay(config: RelayConfig) {
     // Update session meta (model, agentType) - fire and forget
     updateMeta(meta: { model?: string; agentType?: string }): void {
       if (!registered) return;
+      const metaStr = JSON.stringify(meta);
+      if (metaStr === lastMeta) return;
+      lastMeta = metaStr;
+
       try {
         sendToSocket({ type: 'update_meta', ...meta });
       } catch {

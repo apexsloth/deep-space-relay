@@ -238,11 +238,11 @@ export function handleUpdateMeta(
   if (!session) return;
 
   let changed = false;
-  if (msg.model && typeof msg.model === 'string') {
+  if (msg.model && typeof msg.model === 'string' && msg.model !== session.model) {
     session.model = msg.model;
     changed = true;
   }
-  if (msg.agentType && typeof msg.agentType === 'string') {
+  if (msg.agentType && typeof msg.agentType === 'string' && msg.agentType !== session.agentType) {
     session.agentType = msg.agentType;
     changed = true;
   }
