@@ -175,9 +175,10 @@ export function formatThreadTitle(
  * Renders a Markdown status dashboard for a session.
  */
 export function renderStatusDashboard(session: SessionInfo): string {
-  const agent = session.agentName || 'Unknown Agent';
-  const model = session.model || 'Unknown Model';
-  const project = session.project || 'Unknown Project';
+  const persona = session.agentType || 'Unknown';
+  const identity = session.agentName || 'None';
+  const model = session.model || 'Unknown';
+  const project = session.project || 'Unknown';
   const status = session.status || 'idle';
 
   let statusEmoji = '⚪';
@@ -186,7 +187,8 @@ export function renderStatusDashboard(session: SessionInfo): string {
   if (status === 'disconnected') statusEmoji = '🔴';
 
   return [
-    `🤖 **Agent:** ${agent}`,
+    `🤖 **Agent:** \`${persona}\``,
+    `👤 **Identity:** ${identity}`,
     `🛠️ **Model:** \`${model}\``,
     `📊 **Status:** ${statusEmoji} ${status.toUpperCase()}`,
     `📁 **Project:** \`${project}\``,
