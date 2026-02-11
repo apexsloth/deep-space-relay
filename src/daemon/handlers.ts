@@ -11,7 +11,7 @@ import {
   KB_PER_MB,
 } from '../constants';
 
-import { isThreadError } from './reconciler';
+import { isThreadError, clearThreadState } from './reconciler';
 
 export interface MessageHandlerContext {
   state: DaemonState;
@@ -39,7 +39,7 @@ async function sendMarkdown(
 
 /**
  * Execute a send with automatic stale-thread recovery via the reconciler.
- * On thread error, marks the thread unverified, calls reconcile to recreate,
+ * On thread error, clears thread state, calls reconcile to create a new thread,
  * and retries with retryFn (which may differ from sendFn, e.g. dropping
  * reply_to_message_id since the original message won't exist in the new thread).
  */
@@ -51,19 +51,13 @@ async function sendWithRecovery<T>(
   sessionID: string,
 ): Promise<T> {
   try {
-    const result = await sendFn();
-    // Send succeeded — mark thread as verified
-    if (session.threadVerified !== true) {
-      session.threadVerified = true;
-      saveState(ctx.state, ctx.statePath);
-    }
-    return result;
+    return await sendFn();
   } catch (err) {
     if (!isThreadError(err) || !session.threadID) throw err;
 
-    // Thread is stale — mark unverified and reconcile
+    // Thread is stale — clear state and reconcile (creates new thread)
     log(`[Daemon] Thread ${session.threadID} stale for ${sessionID}, reconciling`, 'warn');
-    session.threadVerified = false;
+    clearThreadState(session, ctx.state);
     saveState(ctx.state, ctx.statePath);
 
     const newThreadID = await ctx.reconcile(sessionID);
@@ -774,7 +768,6 @@ export async function handleSetChat(
   const oldChatId = session.chatId;
   session.chatId = newChatId;
   session.threadID = undefined;
-  session.threadVerified = undefined;
   session.statusMessageID = undefined;
   saveState(state, statePath);
 

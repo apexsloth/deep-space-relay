@@ -90,7 +90,6 @@ export interface SessionInfo {
   title: string;
   chatId?: string; // Per-session chatId (from plugin)
   threadID?: number;
-  threadVerified?: boolean; // true = last Telegram send succeeded, false/undefined = needs reconcile
   agentName?: string;
   parentID?: string; // Parent session ID (for subagents)
   model?: string; // e.g. "anthropic/claude-sonnet-4-20250514"

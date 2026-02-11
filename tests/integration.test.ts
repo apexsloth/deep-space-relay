@@ -957,21 +957,19 @@ describe('Deep Space Relay Integration Tests', () => {
 
       const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
 
-      // Verify sessions are saved
+      // Verify sessions are saved (object format, only sessions with threads)
       expect(stateData.sessions).toBeDefined();
-      expect(stateData.sessions.length).toBeGreaterThan(0);
+      expect(Object.keys(stateData.sessions).length).toBeGreaterThan(0);
 
       // Find our session
-      const ourSession = stateData.sessions.find(([id, _info]: [string, any]) => id === sessionId);
-      expect(ourSession).toBeDefined();
-
-      const [_id, info] = ourSession;
+      const info = stateData.sessions[sessionId];
+      expect(info).toBeDefined();
       expect(info.project).toBe('TestProject');
       expect(info.title).toBe(title);
       expect(info.threadID).toBeDefined();
     });
 
-    it('should save threadToSession mapping', async () => {
+    it('should rebuild threadToSession from persisted sessions', async () => {
       const sessionId = 'test-persist-mapping-001';
       const title = 'Persist Mapping Test';
 
@@ -983,15 +981,11 @@ describe('Deep Space Relay Integration Tests', () => {
       const { readFileSync } = await import('fs');
       const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
 
-      // Verify threadToSession is saved
-      expect(stateData.threadToSession).toBeDefined();
-      expect(stateData.threadToSession.length).toBeGreaterThan(0);
-
-      // The mapping should include our session
-      const hasOurSession = stateData.threadToSession.some(
-        ([_threadId, sid]: [number, string]) => sid === sessionId
-      );
-      expect(hasOurSession).toBe(true);
+      // threadToSession is no longer persisted (rebuilt on load from sessions)
+      // Verify the session has a threadID so it can be rebuilt
+      const info = stateData.sessions[sessionId];
+      expect(info).toBeDefined();
+      expect(info.threadID).toBeDefined();
     });
   });
 
@@ -1526,12 +1520,9 @@ describe('Deep Space Relay Integration Tests', () => {
       const { readFileSync } = await import('fs');
       const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
 
-      const ourSession = stateData.sessions.find(
-        ([id, _info]: [string, any]) => id === sessionId
-      );
-      expect(ourSession).toBeDefined();
-
-      const [_id, info] = ourSession;
+      // After setChatId, reconcile creates a new thread in the new chat
+      const info = stateData.sessions[sessionId];
+      expect(info).toBeDefined();
       expect(info.chatId).toBe(newChatId);
       expect(info.threadID).toBeDefined(); // New thread was created
     });

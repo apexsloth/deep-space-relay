@@ -188,8 +188,8 @@ export const DeepSpaceRelay = (async (ctx: PluginContext) => {
   // See: https://github.com/anomalyco/opencode/issues/TBD
 
   return {
-    tools: tools,
-    events: eventHandler,
+    tool: tools,
+    event: eventHandler,
     'permission.ask': permissionHandler,
   };
 }) as unknown as Plugin;

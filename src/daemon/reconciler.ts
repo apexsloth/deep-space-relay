@@ -3,14 +3,14 @@
  *
  * Replaces the reactive ensureThread + recoverStaleThread pattern with a
  * declarative reconciler. Internal state is the source of truth; reconcile()
- * ensures Telegram matches it — creating/recreating threads, updating titles,
- * pinning dashboards as needed.
+ * ensures Telegram matches it — creating threads as needed.
  *
  * Design:
  *   - Main agents get threads eagerly (on register → reconcile)
  *   - Subagents remain lazy (thread on first send, NOT register)
- *   - threadVerified flag avoids extra API calls during normal operation
  *   - Thread creation locks prevent concurrent creation for same session
+ *   - Thread recovery is reactive: sendWithRecovery catches thread errors,
+ *     calls clearThreadState + reconcile to recreate
  */
 
 import { log } from './logger';
@@ -36,11 +36,9 @@ const threadCreationLocks = new Map<string, Promise<number | undefined>>();
 /**
  * Reconcile a session's Telegram thread state.
  *
- * Ensures the session has a valid thread in Telegram, creating or recreating
- * as needed. Uses threadVerified flag to avoid unnecessary API calls:
- *   - threadVerified === true  → thread is known-good, no API call
- *   - threadVerified === false → thread needs verification/recreation
- *   - threadVerified undefined → treat like true if threadID exists
+ * Simple: if the session has a threadID, return it. If not, create one.
+ * Thread recovery (deleted threads) is handled reactively by sendWithRecovery,
+ * which calls clearThreadState + reconcile to recreate.
  *
  * @param sessionID   - The session to reconcile
  * @param state       - Daemon state
@@ -73,54 +71,25 @@ export async function reconcile(
     session.chatId = effectiveChatId;
   }
 
-  // Case 1: Thread exists and is verified (or assumed verified) — no-op
-  if (session.threadID && session.threadVerified !== false) {
+  // Thread exists — trust it. Recovery happens in sendWithRecovery if it's stale.
+  if (session.threadID) {
     return session.threadID;
   }
 
-  // Case 2: Thread exists but needs verification
-  if (session.threadID && session.threadVerified === false) {
-    log(`[Reconciler] Verifying thread ${session.threadID} for ${sessionID}`, 'debug');
-    try {
-      await bot.sendChatAction({
-        chat_id: effectiveChatId,
-        message_thread_id: session.threadID,
-        action: 'typing',
-      });
-      // Thread is still valid
-      session.threadVerified = true;
-      saveState(state, statePath);
-      log(`[Reconciler] Thread ${session.threadID} verified for ${sessionID}`, 'debug');
-      return session.threadID;
-    } catch (err) {
-      if (isThreadError(err)) {
-        // Thread is gone — clear state and fall through to creation
-        log(`[Reconciler] Thread ${session.threadID} stale for ${sessionID}, recreating`, 'warn');
-        clearThreadState(session, state);
-        saveState(state, statePath);
-      } else {
-        // Transient error — don't nuke the thread, leave for next attempt
-        log(`[Reconciler] Verification failed for ${sessionID} (transient): ${err}`, 'warn');
-        return session.threadID;
-      }
-    }
-  }
-
-  // Case 3: No threadID — create a new thread (with deduplication lock)
+  // No threadID — create a new thread (with deduplication lock)
   return createThread(sessionID, state, statePath, bot, effectiveChatId);
 }
 
 /**
  * Clear all thread-related state for a session.
- * Used when a thread is confirmed deleted/stale.
+ * Used by sendWithRecovery when a thread is confirmed deleted/stale.
  */
-function clearThreadState(session: SessionInfo, state: DaemonState): void {
+export function clearThreadState(session: SessionInfo, state: DaemonState): void {
   if (session.threadID && session.chatId) {
     state.threadToSession.delete(`${session.chatId}:${session.threadID}`);
     state.threadToSession.delete(String(session.threadID));
   }
   session.threadID = undefined;
-  session.threadVerified = undefined;
   session.statusMessageID = undefined;
 }
 
@@ -166,7 +135,6 @@ async function createThread(
       log(`[Reconciler] Thread created: ${threadID}`, 'info');
 
       session.threadID = threadID;
-      session.threadVerified = true;
       session.chatId = chatId;
       state.threadToSession.set(`${chatId}:${threadID}`, sessionID);
 

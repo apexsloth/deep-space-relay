@@ -23,12 +23,25 @@ export function createState(statePath: string): DaemonState {
   if (existsSync(statePath)) {
     try {
       const data = JSON.parse(readFileSync(statePath, 'utf-8'));
-      for (const [id, info] of data.sessions) {
+      // Handle both old format (array of pairs [[id, info], ...]) and new format ({ id: info })
+      const entries: [string, any][] = Array.isArray(data.sessions)
+        ? data.sessions
+        : Object.entries(data.sessions);
+      let skipped = 0;
+      for (const [id, info] of entries) {
+        // Skip sessions without threads — they're ephemeral and will re-register
+        if (!info.threadID) {
+          skipped++;
+          continue;
+        }
         info.pendingPermissions = new Map(info.pendingPermissions || []);
         info.pendingAsks = new Map(info.pendingAsks || []);
         info.messageQueue = info.messageQueue || [];
         info.messageIDs = info.messageIDs || [];
         sessions.set(id, info);
+      }
+      if (skipped > 0) {
+        log(`Pruned ${skipped} session(s) without threads on load`, 'info');
       }
 
       // Rebuild threadToSession from sessions to fix potential collisions and migrate to composite keys
@@ -54,10 +67,15 @@ export function createState(statePath: string): DaemonState {
 }
 
 export function saveState(state: DaemonState, statePath: string) {
-  const data = {
-    sessions: Array.from(state.sessions.entries()),
-    threadToSession: Array.from(state.threadToSession.entries()),
-  };
+  // Only persist sessions with threads — threadless sessions are ephemeral
+  // threadToSession is rebuilt from sessions on load, no need to persist
+  const sessions: Record<string, any> = {};
+  for (const [id, session] of state.sessions) {
+    if (session.threadID) {
+      sessions[id] = session;
+    }
+  }
+  const data = { sessions };
 
   // Use atomic write: write to .tmp file first, then rename
   // This prevents corruption if the process crashes mid-write
@@ -69,6 +87,7 @@ export function saveState(state: DaemonState, statePath: string) {
       JSON.stringify(
         data,
         (key, value) => {
+          // Maps inside sessions (pendingPermissions, pendingAsks) still need conversion
           if (value instanceof Map) return Array.from(value.entries());
           return value;
         },
