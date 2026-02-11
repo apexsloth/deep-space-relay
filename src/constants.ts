@@ -113,6 +113,9 @@ export const SECONDS_PER_MINUTE = 60;
 /** Seconds per hour */
 export const SECONDS_PER_HOUR = 3600;
 
+/** Minutes per hour */
+export const MINUTES_PER_HOUR = 60;
+
 /** Bytes per kilobyte */
 export const BYTES_PER_KB = 1024;
 

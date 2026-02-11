@@ -149,7 +149,7 @@ export class LifecycleCoordinator extends EventEmitter {
       this.transition('standby');
     } else {
       this.log('info', 'No leader found, attempting to become leader');
-      this.emit('become_leader', { reason: 'startup' });
+      this.transition('leading', { reason: 'startup' });
     }
   }
 
@@ -172,7 +172,7 @@ export class LifecycleCoordinator extends EventEmitter {
 
       if (!leaderAlive) {
         this.log('info', 'Leader lost, attempting takeover');
-        this.emit('become_leader', { reason: 'takeover' });
+        this.transition('leading', { reason: 'takeover' });
       } else {
         this.scheduleStandbyCheck();
       }

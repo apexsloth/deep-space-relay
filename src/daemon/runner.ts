@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { connect } from 'node:net';
 import { randomBytes } from 'node:crypto';
@@ -127,10 +127,9 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
   if (forceMode && !effectiveIpcToken) {
     // Try to load token from system token path
     try {
-      const { SYSTEM_TOKEN_PATH } = require('./setup');
       log(`Looking for token at: ${SYSTEM_TOKEN_PATH}`, 'debug');
       if (existsSync(SYSTEM_TOKEN_PATH)) {
-        const tokenData = JSON.parse(require('node:fs').readFileSync(SYSTEM_TOKEN_PATH, 'utf-8'));
+        const tokenData = JSON.parse(readFileSync(SYSTEM_TOKEN_PATH, 'utf-8'));
         effectiveIpcToken = tokenData.token;
         log(
           `Loaded IPC token for force takeover (${effectiveIpcToken ? 'found' : 'empty'})`,
@@ -173,9 +172,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
         };
         if (configPathOverride && existsSync(configPathOverride)) {
           try {
-            const testConfig = JSON.parse(
-              require('node:fs').readFileSync(configPathOverride, 'utf-8')
-            );
+            const testConfig = JSON.parse(readFileSync(configPathOverride, 'utf-8'));
             if (testConfig.token && !tokenOverride) config.token = testConfig.token;
             if (testConfig.chatId) config.chatId = testConfig.chatId;
             if (testConfig.ipcToken && !config.ipcToken) config.ipcToken = testConfig.ipcToken;

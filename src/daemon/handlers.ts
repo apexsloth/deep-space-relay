@@ -6,10 +6,19 @@ import { AGENT_NAMES, getRandomAgentName, getSubagentName, formatThreadTitle, ad
 import {
   MS_PER_SECOND,
   SECONDS_PER_MINUTE,
-  SECONDS_PER_HOUR,
+  MINUTES_PER_HOUR,
   BYTES_PER_KB,
   KB_PER_MB,
 } from '../constants';
+
+// Helper function to check if an error is thread-related
+function isThreadError(err: unknown): boolean {
+  const errStr = String(err).toLowerCase();
+  return errStr.includes('message thread not found') ||
+         errStr.includes('topic_deleted') ||
+         errStr.includes('thread id is invalid') ||
+         errStr.includes('thread not found');
+}
 
 export interface MessageHandlerContext {
   state: DaemonState;
@@ -32,8 +41,7 @@ async function recoverStaleThread(
 ): Promise<boolean> {
   if (!session.threadID) return false;
 
-  const errStr = String(err);
-  const isThreadNotFound = errStr.includes('message thread not found');
+  const isThreadNotFound = isThreadError(err);
   const chatIdChanged = !!(session.chatId && ctx.chatId && session.chatId !== ctx.chatId);
 
   // Recover if thread was deleted on Telegram side, OR if the daemon's chatId
@@ -60,6 +68,45 @@ async function recoverStaleThread(
   // Create new thread in the (potentially updated) chat
   await ctx.ensureThread(sessionID, session.project, session.title, session.chatId);
   return true;
+}
+
+/**
+ * Send a message with Markdown formatting, falling back to plain text if parsing fails.
+ * Throws on API failure.
+ */
+async function sendMarkdown(
+  bot: TelegramClient,
+  params: Record<string, any>
+): Promise<any> {
+  let result = await bot.sendMessage({ ...params, parse_mode: 'Markdown' });
+  if (!result.ok && result.description?.includes("can't parse entities")) {
+    result = await bot.sendMessage(params);
+  }
+  if (!result.ok) throw new Error(result.description);
+  return result;
+}
+
+/**
+ * Execute a send with automatic stale-thread recovery.
+ * On thread error, recreates the thread and retries with retryFn (which may differ from sendFn,
+ * e.g. dropping reply_to_message_id since the original message won't exist in the new thread).
+ */
+async function sendWithRecovery<T>(
+  sendFn: () => Promise<T>,
+  retryFn: () => Promise<T>,
+  session: SessionInfo,
+  ctx: MessageHandlerContext,
+  sessionID: string,
+): Promise<T> {
+  try {
+    return await sendFn();
+  } catch (err) {
+    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
+    if (recovered && session.threadID) {
+      return await retryFn();
+    }
+    throw err;
+  }
 }
 
 export async function handleRegister(
@@ -274,7 +321,7 @@ export async function handleTyping(
         });
       } catch (err) {
         // Typing indicator is non-critical; detect stale thread for logging but don't retry
-        if (String(err).includes('message thread not found')) {
+        if (isThreadError(err)) {
           log(`[Daemon] Typing failed due to stale thread for ${sessionID}, will recover on next send`, 'warn');
         } else {
           log(`[Daemon] Failed to send typing indicator: ${err}`, 'debug');
@@ -324,29 +371,16 @@ export async function handleSend(
     await ensureThread(sessionID, session.project, session.title, session.chatId);
   }
 
+  const text = msg.text;
   try {
-    // Thread title already shows agent name — no prefix needed for thread messages
-    const text = msg.text;
-    let result = await bot.sendMessage({
-      chat_id: session.chatId,
-      message_thread_id: session.threadID,
-      text,
-      parse_mode: 'Markdown',
-    });
-    // Fallback to plain text if Markdown parsing fails
-    if (!result.ok && result.description?.includes("can't parse entities")) {
-      result = await bot.sendMessage({
-        chat_id: session.chatId,
-        message_thread_id: session.threadID,
-        text,
-      });
-    }
-    if (!result.ok) throw new Error(result.description);
-
+    const result = await sendWithRecovery(
+      () => sendMarkdown(bot, { chat_id: session.chatId, message_thread_id: session.threadID, text }),
+      () => sendMarkdown(bot, { chat_id: session.chatId, message_thread_id: session.threadID, text }),
+      session, ctx, sessionID
+    );
     session.lastMessageID = result.result.message_id;
     addMessageID(session, result.result.message_id);
     saveState(state, statePath);
-
     sendToClient(state.clients, sessionID, {
       type: 'sent',
       success: true,
@@ -354,63 +388,12 @@ export async function handleSend(
       correlationId,
     });
   } catch (err) {
-    const errorStr = String(err);
-    
-    // Check if this is a stale thread error
-    if (errorStr.includes('message thread not found') || errorStr.includes('thread not found')) {
-      log(`[Daemon] Thread ${session.threadID} not found, recreating...`, 'info');
-      const recovered = await recoverStaleThread(err, session, ctx, sessionID);
-      
-      if (recovered && session.threadID) {
-        try {
-          const text = msg.text;
-          let result = await bot.sendMessage({
-            chat_id: session.chatId,
-            message_thread_id: session.threadID,
-            text,
-            parse_mode: 'Markdown',
-          });
-          if (!result.ok && result.description?.includes("can't parse entities")) {
-            result = await bot.sendMessage({
-              chat_id: session.chatId,
-              message_thread_id: session.threadID,
-              text,
-            });
-          }
-          if (!result.ok) throw new Error(result.description);
-
-          session.lastMessageID = result.result.message_id;
-          addMessageID(session, result.result.message_id);
-          saveState(state, statePath);
-
-          log(`[Daemon] Message sent to new thread ${session.threadID}`, 'info');
-          sendToClient(state.clients, sessionID, {
-            type: 'sent',
-            success: true,
-            messageID: result.result.message_id,
-            correlationId,
-          });
-          return;
-        } catch (retryErr) {
-          log(`[Daemon] Retry send failed after thread recovery: ${retryErr}`, 'error');
-          sendToClient(state.clients, sessionID, {
-            type: 'sent',
-            success: false,
-            correlationId,
-            error: String(retryErr),
-          });
-          return;
-        }
-      }
-    }
-    
-    // For other errors or if recovery failed
     log(`[Daemon] Failed to send message: ${err}`, 'error');
     sendToClient(state.clients, sessionID, {
       type: 'sent',
       success: false,
       correlationId,
-      error: errorStr,
+      error: String(err),
     });
   }
 }
@@ -448,14 +431,8 @@ export async function handleBroadcast(
 
   try {
     const namePart = session.agentName ? `**[${session.agentName}]:** ` : '';
-    let text = `${namePart}${msg.text}`;
-
-    let result = await bot.sendMessage({ chat_id: session.chatId, text, parse_mode: 'Markdown' });
-    // Fallback to plain text if Markdown parsing fails
-    if (!result.ok && result.description?.includes("can't parse entities")) {
-      result = await bot.sendMessage({ chat_id: session.chatId, text });
-    }
-    if (!result.ok) throw new Error(result.description);
+    const text = `${namePart}${msg.text}`;
+    const result = await sendMarkdown(bot, { chat_id: session.chatId, text });
     socket.write(
       JSON.stringify({
         type: 'broadcast',
@@ -489,67 +466,33 @@ export async function handleReplyTo(
   }
 
   try {
-    let res = await bot.sendMessage({
-      chat_id: session.chatId,
-      message_thread_id: session.threadID,
-      text: msg.text,
-      reply_to_message_id: msg.messageID,
-      parse_mode: 'Markdown',
-    });
-    // Fallback to plain text if Markdown parsing fails
-    if (!res.ok && res.description?.includes("can't parse entities")) {
-      res = await bot.sendMessage({
+    const result = await sendWithRecovery(
+      () => sendMarkdown(bot, {
         chat_id: session.chatId,
         message_thread_id: session.threadID,
         text: msg.text,
         reply_to_message_id: msg.messageID,
-      });
-    }
-    if (!res.ok) throw new Error(res.description);
-    addMessageID(session, res.result.message_id);
+      }),
+      // Retry without reply_to_message_id since old message won't exist in new thread
+      () => sendMarkdown(bot, {
+        chat_id: session.chatId,
+        message_thread_id: session.threadID,
+        text: msg.text,
+      }),
+      session, ctx, sessionID
+    );
+    addMessageID(session, result.result.message_id);
     saveState(state, statePath);
     socket.write(
       JSON.stringify({
         type: 'reply_to',
         success: true,
-        messageID: res.result.message_id,
+        messageID: result.result.message_id,
         correlationId,
       }) + '\n'
     );
   } catch (err) {
-    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
-    if (recovered && session.threadID) {
-      try {
-        // Retry without reply_to_message_id since old message won't exist in new thread
-        let res = await bot.sendMessage({
-          chat_id: session.chatId,
-          message_thread_id: session.threadID,
-          text: msg.text,
-          parse_mode: 'Markdown',
-        });
-        if (!res.ok && res.description?.includes("can't parse entities")) {
-          res = await bot.sendMessage({
-            chat_id: session.chatId,
-            message_thread_id: session.threadID,
-            text: msg.text,
-          });
-        }
-        if (!res.ok) throw new Error(res.description);
-        addMessageID(session, res.result.message_id);
-        saveState(state, statePath);
-        socket.write(
-          JSON.stringify({
-            type: 'reply_to',
-            success: true,
-            messageID: res.result.message_id,
-            correlationId,
-          }) + '\n'
-        );
-        return;
-      } catch (retryErr) {
-        log(`[Daemon] Failed to reply after thread recovery: ${retryErr}`, 'error');
-      }
-    }
+    log(`[Daemon] Failed to reply: ${err}`, 'error');
     socket.write(
       JSON.stringify({ type: 'reply_to', success: false, error: String(err), correlationId }) + '\n'
     );
@@ -591,33 +534,18 @@ export async function handleAsk(
   }
 
   try {
-    const res = await bot.sendMessage({
+    const sendAsk = () => sendMarkdown(bot, {
       chat_id: session.chatId,
       message_thread_id: session.threadID,
       text: msg.question,
       reply_markup: { inline_keyboard },
     });
-    addMessageID(session, res.result.message_id);
+    const result = await sendWithRecovery(sendAsk, sendAsk, session, ctx, sessionID);
+    addMessageID(session, result.result.message_id);
     saveState(state, statePath);
     socket.write(JSON.stringify({ type: 'ask_ack', askID, success: true, correlationId }) + '\n');
   } catch (err) {
-    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
-    if (recovered && session.threadID) {
-      try {
-        const res = await bot.sendMessage({
-          chat_id: session.chatId,
-          message_thread_id: session.threadID,
-          text: msg.question,
-          reply_markup: { inline_keyboard },
-        });
-        addMessageID(session, res.result.message_id);
-        saveState(state, statePath);
-        socket.write(JSON.stringify({ type: 'ask_ack', askID, success: true, correlationId }) + '\n');
-        return;
-      } catch (retryErr) {
-        log(`[Daemon] Failed to send ask after thread recovery: ${retryErr}`, 'error');
-      }
-    }
+    log(`[Daemon] Failed to send ask: ${err}`, 'error');
     socket.write(
       JSON.stringify({
         type: 'ask_ack',
@@ -778,56 +706,30 @@ export async function handlePermissionRequest(
 
   if (!session.threadID) await ensureThread(sid, session.project, session.title, session.chatId);
 
+  const permText = `🔒 **Permission Request**\n\n**Tool:** \`${msg.tool}\`\n**Description:** ${msg.description}`;
+  const permMarkup = {
+    inline_keyboard: [
+      [
+        { text: '✅ Approve', callback_data: `approve:${msg.permissionID}` },
+        { text: '❌ Deny', callback_data: `deny:${msg.permissionID}` },
+      ],
+      [
+        { text: '🛡️ Always', callback_data: `always:${msg.permissionID}` },
+        { text: '🚫 Never', callback_data: `never:${msg.permissionID}` },
+      ],
+    ],
+  };
   try {
-    const result = await bot.sendMessage({
+    const sendPerm = () => sendMarkdown(bot, {
       chat_id: session.chatId,
       message_thread_id: session.threadID,
-      text: `🔒 **Permission Request**\n\n**Tool:** \`${msg.tool}\`\n**Description:** ${msg.description}`,
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '✅ Approve', callback_data: `approve:${msg.permissionID}` },
-            { text: '❌ Deny', callback_data: `deny:${msg.permissionID}` },
-          ],
-          [
-            { text: '🛡️ Always', callback_data: `always:${msg.permissionID}` },
-            { text: '🚫 Never', callback_data: `never:${msg.permissionID}` },
-          ],
-        ],
-      },
+      text: permText,
+      reply_markup: permMarkup,
     });
+    const result = await sendWithRecovery(sendPerm, sendPerm, session, ctx, sid);
     session.pendingPermissions.set(msg.permissionID, result.result.message_id);
     saveState(state, statePath);
   } catch (err) {
-    const recovered = await recoverStaleThread(err, session, ctx, sid);
-    if (recovered && session.threadID) {
-      try {
-        const result = await bot.sendMessage({
-          chat_id: session.chatId,
-          message_thread_id: session.threadID,
-          text: `🔒 **Permission Request**\n\n**Tool:** \`${msg.tool}\`\n**Description:** ${msg.description}`,
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '✅ Approve', callback_data: `approve:${msg.permissionID}` },
-                { text: '❌ Deny', callback_data: `deny:${msg.permissionID}` },
-              ],
-              [
-                { text: '🛡️ Always', callback_data: `always:${msg.permissionID}` },
-                { text: '🚫 Never', callback_data: `never:${msg.permissionID}` },
-              ],
-            ],
-          },
-        });
-        session.pendingPermissions.set(msg.permissionID, result.result.message_id);
-        saveState(state, statePath);
-        return;
-      } catch (retryErr) {
-        log(`[Daemon] Failed to send permission request after thread recovery: ${retryErr}`, 'error');
-      }
-    }
     log(`[Daemon] Failed to send permission request: ${err}`, 'debug');
   }
 }
@@ -845,25 +747,13 @@ export async function handleErrorNotification(
 
   if (session?.threadID) {
     try {
-      await bot.sendMessage({
+      const sendErr = () => sendMarkdown(bot, {
         chat_id: session.chatId,
         message_thread_id: session.threadID,
         text: `⚠️ Error: ${msg.errorName}\n${msg.errorMessage}`,
       });
+      await sendWithRecovery(sendErr, sendErr, session, ctx, sid);
     } catch (err) {
-      const recovered = await recoverStaleThread(err, session, ctx, sid);
-      if (recovered && session.threadID) {
-        try {
-          await bot.sendMessage({
-            chat_id: session.chatId,
-            message_thread_id: session.threadID,
-            text: `⚠️ Error: ${msg.errorName}\n${msg.errorMessage}`,
-          });
-          return;
-        } catch (retryErr) {
-          log(`[Daemon] Failed to send error notification after thread recovery: ${retryErr}`, 'error');
-        }
-      }
       // Error notifications are non-critical, log at debug level
       log(`[Daemon] Failed to send error notification: ${err}`, 'debug');
     }
@@ -948,12 +838,12 @@ export function handleHealth(msg: any, socket: any, ctx: MessageHandlerContext, 
   const uptimeMs = Date.now() - startTime;
   const uptimeSec = Math.floor(uptimeMs / MS_PER_SECOND);
   const uptimeMin = Math.floor(uptimeSec / SECONDS_PER_MINUTE);
-  const uptimeHours = Math.floor(uptimeMin / SECONDS_PER_MINUTE);
+  const uptimeHours = Math.floor(uptimeMin / MINUTES_PER_HOUR);
 
   // Format uptime
   let uptimeStr: string;
   if (uptimeHours > 0) {
-    uptimeStr = `${uptimeHours}h ${uptimeMin % SECONDS_PER_MINUTE}m`;
+    uptimeStr = `${uptimeHours}h ${uptimeMin % MINUTES_PER_HOUR}m`;
   } else if (uptimeMin > 0) {
     uptimeStr = `${uptimeMin}m ${uptimeSec % SECONDS_PER_MINUTE}s`;
   } else {

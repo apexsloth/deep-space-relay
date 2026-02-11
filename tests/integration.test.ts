@@ -88,7 +88,7 @@ describe('Deep Space Relay Integration Tests', () => {
         description: string;
       }>;
       expect(commands).toBeDefined();
-      expect(commands.length).toBe(10); // start, list, list_all, agent, name, cleanup, compact, help, all, stop
+      expect(commands.length).toBe(11); // start, list, list_all, agent, name, cleanup, compact, help, all, stop, clear
 
       // Check each command
       const commandMap = new Map(commands.map((c) => [c.command, c.description]));
@@ -157,10 +157,11 @@ describe('Deep Space Relay Integration Tests', () => {
       expect(topicCalls.length).toBe(1);
       expect(topicCalls[0].params.name).toContain('Lazy Thread Test');
 
-      // Verify message was sent
+      // Verify message was sent (first sendMessage is the dashboard, user message follows)
       const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
-      expect(messageCalls.length).toBeGreaterThan(0);
-      expect(messageCalls[0].params.text).toContain('Hello from test!');
+      expect(messageCalls.length).toBeGreaterThan(1);
+      const userMessage = messageCalls.find((c) => (c.params.text as string)?.includes('Hello from test!'));
+      expect(userMessage).toBeDefined();
     });
 
     it('should only create thread once for multiple sends', async () => {
@@ -178,9 +179,9 @@ describe('Deep Space Relay Integration Tests', () => {
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
       expect(topicCalls.length).toBe(1);
 
-      // Verify all messages were sent
+      // Verify all messages were sent (1 dashboard + 3 user messages)
       const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
-      expect(messageCalls.length).toBe(3);
+      expect(messageCalls.length).toBe(4);
     });
   });
 
@@ -896,6 +897,12 @@ describe('Deep Space Relay Integration Tests', () => {
       const title = 'Markdown Fallback Test';
 
       await relay.register(sessionId, title);
+
+      // Send a first message to trigger thread creation (which sends a dashboard message)
+      await relay.send('warmup message');
+
+      // Clear previous calls so we only see the markdown fallback calls
+      mockTelegram.calls.length = 0;
 
       // Enable markdown fail mode on the mock
       mockTelegram.setMarkdownFailMode(true);

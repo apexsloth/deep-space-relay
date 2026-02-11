@@ -131,18 +131,26 @@ export function createMessageHandler(
         state.threadToSession.get(`${msgChatId}:${threadId}`) ||
         state.threadToSession.get(String(threadId || 0));
       if (sid) {
-        await handleSetAgentName(
+         const renameResult = await handleSetAgentName(
           { name: text, sessionID: sid },
           null,
-          { state, statePath, bot, chatId, ensureThread: async () => undefined },
+          { state, statePath, bot, chatId: msgChatId, ensureThread: async () => undefined },
           sid
         );
-        await bot.sendMessage({
-          chat_id: chatId,
-          message_thread_id: threadId,
-          text: `Agent renamed to **${text}**`,
-          parse_mode: 'Markdown',
-        });
+        if (renameResult === false) {
+          await bot.sendMessage({
+            chat_id: msgChatId,
+            message_thread_id: threadId,
+            text: `Failed to rename agent. Name may be taken or invalid.`,
+          });
+        } else {
+          await bot.sendMessage({
+            chat_id: msgChatId,
+            message_thread_id: threadId,
+            text: `Agent renamed to **${text}**`,
+            parse_mode: 'Markdown',
+          });
+        }
       }
       return;
     }
@@ -165,7 +173,7 @@ export function createMessageHandler(
     }
 
     // Global commands should work regardless of whether chat has active sessions
-    const globalCommands = ['/list', '/list_all', '/cleanup', '/all'];
+    const globalCommands = ['/list', '/list_all', '/cleanup', '/help'];
     const isGlobalCommand = globalCommands.includes(text);
 
     // Daemon is a pure router - only accept messages from chats that have registered sessions
@@ -369,7 +377,7 @@ export function createMessageHandler(
         `Pick a name from the **Final Space or sci-fi cult classics** to get started!`,
       ].join('\n');
       await bot.sendMessage({
-        chat_id: chatId,
+        chat_id: msgChatId,
         message_thread_id: threadId,
         text: msg,
         parse_mode: 'Markdown',
@@ -380,7 +388,7 @@ export function createMessageHandler(
     if (text === '/agent') {
       if (!threadId) {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           text: `Please use /agent inside an agent's thread to see specific info.`,
         });
         return;
@@ -391,7 +399,7 @@ export function createMessageHandler(
       const session = sid ? state.sessions.get(sid) : null;
       if (!session) {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           message_thread_id: threadId,
           text: 'Session info not found for this thread.',
         });
@@ -409,7 +417,7 @@ export function createMessageHandler(
         `**Session ID:** \`${session.sessionID}\``,
       ].join('\n');
       await bot.sendMessage({
-        chat_id: chatId,
+        chat_id: msgChatId,
         message_thread_id: threadId,
         text: msg,
         parse_mode: 'Markdown',
@@ -423,7 +431,7 @@ export function createMessageHandler(
     if (text.startsWith('/name')) {
       if (!threadId) {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           text: `Please use /name inside an agent's thread. Usage: /name <new name>`,
         });
         return;
@@ -431,7 +439,7 @@ export function createMessageHandler(
       const newName = text.replace('/name', '').trim();
       if (!newName) {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           message_thread_id: threadId,
           text: 'Usage: `/name <new name>`',
           parse_mode: 'Markdown',
@@ -445,18 +453,18 @@ export function createMessageHandler(
         await handleSetAgentName(
           { name: newName, sessionID: sid },
           null,
-          { state, statePath, bot, chatId, ensureThread: async () => undefined },
+          { state, statePath, bot, chatId: msgChatId, ensureThread: async () => undefined },
           sid
         );
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           message_thread_id: threadId,
           text: `Agent renamed to **${newName}**`,
           parse_mode: 'Markdown',
         });
       } else {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           message_thread_id: threadId,
           text: 'No session found for this thread.',
         });
@@ -483,9 +491,6 @@ export function createMessageHandler(
       }
 
       const lines = [showAll ? 'All Agent Sessions:' : 'Active Agents:', ''];
-      const strippedChatId = chatId.startsWith('-100')
-        ? chatId.slice(TELEGRAM_CHAT_ID_PREFIX_LENGTH)
-        : chatId;
       for (const [sid, session] of sessionsToShow) {
         const isConnected = state.clients.has(sid);
         const prefix = session.parentID ? '\uD83E\uDDF5' : '';
@@ -493,6 +498,10 @@ export function createMessageHandler(
         const agentName = session.agentName || 'Agent';
         const safeProject = session.project || 'unknown';
         const safeTitle = session.title || 'untitled';
+        const sessionChatId = session.chatId || chatId;
+        const strippedChatId = sessionChatId.startsWith('-100')
+          ? sessionChatId.slice(TELEGRAM_CHAT_ID_PREFIX_LENGTH)
+          : sessionChatId;
         const threadLink = session.threadID
           ? `https://t.me/c/${strippedChatId}/${session.threadID}`
           : '';
