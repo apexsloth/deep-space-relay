@@ -354,6 +354,11 @@ async function main(): Promise<void> {
   const command = args[0];
   const flags = new Set(args.slice(1));
   const forceMode = flags.has('--force') || flags.has('-f');
+  const debugMode = flags.has('--debug') || flags.has('-d');
+
+  if (debugMode) {
+    process.env.DSR_LOG_LEVEL = 'debug';
+  }
 
   switch (command) {
     case 'setup':
