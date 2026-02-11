@@ -277,6 +277,11 @@ export function createMessageHandler(
 
       // Delete the /clear command itself immediately
       try {
+        await bot.setMessageReaction({
+          chat_id: msgChatId,
+          message_id: message.message_id,
+          reaction: [{ type: 'emoji', emoji: '🧹' }],
+        });
         await bot.deleteMessage({ chat_id: msgChatId, message_id: message.message_id });
       } catch (err) {
         // Ignore
