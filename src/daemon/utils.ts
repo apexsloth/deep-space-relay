@@ -126,9 +126,10 @@ export function getSubagentName(parentSessionID: string, state: DaemonState): st
  * Formats a Telegram thread title consistently across the daemon.
  * Uses session.parentID to determine subagent status (explicit, not heuristic).
  *
- * Format: "[AgentName] title" or "[AgentName] project: title"
+ * Format: "AgentName title" or "AgentName project: title"
  * - Omits project prefix when title equals project name (avoids "proj: proj")
  * - Omits project prefix when title already contains the project name
+ * - Strips agent name from title start if duplicated (avoids "Mochi proj: Mochi: task")
  */
 export function formatThreadTitle(
   agentName: string | undefined,
@@ -138,19 +139,33 @@ export function formatThreadTitle(
 ): string {
   let nameTag: string;
   if (isSubagent) {
-    nameTag = agentName ? `[🧵 ${agentName}] ` : '[🧵] ';
+    nameTag = agentName ? `🧵 ${agentName} ` : '🧵 ';
   } else {
-    nameTag = agentName ? `[${agentName}] ` : '';
+    nameTag = agentName ? `${agentName} ` : '';
+  }
+
+  // Strip agent name from start of title if present (prevents duplication)
+  // e.g. agentName="Mochi", title="Mochi: Build feature" → title="Build feature"
+  let cleanTitle = title;
+  if (agentName) {
+    const lowerTitle = cleanTitle.toLowerCase();
+    const lowerName = agentName.toLowerCase();
+    if (lowerTitle.startsWith(lowerName)) {
+      const stripped = cleanTitle.slice(agentName.length).replace(/^[:\s]+/, '').trim();
+      if (stripped) {
+        cleanTitle = stripped;
+      }
+    }
   }
 
   // Skip project prefix if title IS the project name or already contains it
-  const titleLower = title.toLowerCase();
+  const titleLower = cleanTitle.toLowerCase();
   const projectLower = project.toLowerCase();
   const skipProject =
     titleLower === projectLower ||
     titleLower.includes(projectLower);
 
-  const body = skipProject ? title : `${project}: ${title}`;
+  const body = skipProject ? cleanTitle : `${project}: ${cleanTitle}`;
   return `${nameTag}${body}`.trim();
 }
 

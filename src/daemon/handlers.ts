@@ -837,6 +837,77 @@ export async function handleErrorNotification(
   }
 }
 
+export async function handleSetChat(
+  msg: any,
+  socket: any,
+  ctx: MessageHandlerContext,
+  currentSessionID: string | null
+) {
+  const { state, statePath, ensureThread } = ctx;
+  const sessionID = msg.sessionID || currentSessionID;
+  const correlationId = msg.correlationId;
+  const newChatId = msg.chatId;
+
+  if (!sessionID) {
+    socket.write(
+      JSON.stringify({ type: 'set_chat_ack', success: false, error: 'No session', correlationId }) + '\n'
+    );
+    return;
+  }
+
+  if (!newChatId || typeof newChatId !== 'string') {
+    socket.write(
+      JSON.stringify({ type: 'set_chat_ack', success: false, error: 'chatId is required', correlationId }) + '\n'
+    );
+    return;
+  }
+
+  const session = state.sessions.get(sessionID);
+  if (!session) {
+    socket.write(
+      JSON.stringify({ type: 'set_chat_ack', success: false, error: 'Session not found', correlationId }) + '\n'
+    );
+    return;
+  }
+
+  // Clear old thread mapping if thread existed in old chat
+  if (session.threadID && session.chatId) {
+    state.threadToSession.delete(`${session.chatId}:${session.threadID}`);
+    state.threadToSession.delete(String(session.threadID));
+  }
+
+  // Update session chatId and clear threadID so a new one is created
+  const oldChatId = session.chatId;
+  session.chatId = newChatId;
+  session.threadID = undefined;
+  saveState(state, statePath);
+
+  log(`[Daemon] Switching session ${sessionID} from chat ${oldChatId} to ${newChatId}`, 'info');
+
+  // Create a new thread in the target chat
+  try {
+    const threadID = await ensureThread(sessionID, session.project, session.title, newChatId);
+    socket.write(
+      JSON.stringify({
+        type: 'set_chat_ack',
+        success: true,
+        threadID,
+        correlationId,
+      }) + '\n'
+    );
+  } catch (err) {
+    log(`[Daemon] Failed to create thread in new chat: ${err}`, 'error');
+    socket.write(
+      JSON.stringify({
+        type: 'set_chat_ack',
+        success: false,
+        error: `Failed to create thread in new chat: ${String(err)}`,
+        correlationId,
+      }) + '\n'
+    );
+  }
+}
+
 export function handleHealth(msg: any, socket: any, ctx: MessageHandlerContext, startTime: number) {
   const { state } = ctx;
   const correlationId = msg.correlationId;

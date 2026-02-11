@@ -195,8 +195,8 @@ describe('Deep Space Relay Integration Tests', () => {
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
       expect(topicCalls.length).toBe(1);
 
-      // Main agent should get no robot emoji tag and no empty brackets
-      // (Optional [Name] prefix is OK because daemon assigns random names now)
+      // Main agent should get no robot emoji tag
+      // (Optional Name prefix is OK because daemon assigns random names now)
       const threadName = topicCalls[0].params.name as string;
       expect(threadName).toMatch(/TestProject/);
     });
@@ -214,9 +214,9 @@ describe('Deep Space Relay Integration Tests', () => {
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
       expect(topicCalls.length).toBe(1);
 
-      // Main agent with name should get [Name] tag (no emoji)
+      // Main agent with name should get Name tag (no emoji)
       const threadName = topicCalls[0].params.name as string;
-      expect(threadName).toMatch(/^\[Wall-E\] TestProject/);
+      expect(threadName).toMatch(/^Wall-E TestProject/);
     });
 
     it('should use thread emoji tag for subagent sessions', async () => {
@@ -235,9 +235,9 @@ describe('Deep Space Relay Integration Tests', () => {
       // May have 1 or 2 depending on whether parent triggered thread creation
       const lastTopic = topicCalls[topicCalls.length - 1];
 
-      // Subagent should get thread emoji tag [🧵]
+      // Subagent should get thread emoji tag 🧵
       const threadName = lastTopic.params.name as string;
-      expect(threadName).toMatch(/\[\uD83E\uDDF5/);
+      expect(threadName).toMatch(/\uD83E\uDDF5/);
     });
 
     it('should use thread emoji with name for subagent with agentName', async () => {
@@ -255,9 +255,9 @@ describe('Deep Space Relay Integration Tests', () => {
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
       const lastTopic = topicCalls[topicCalls.length - 1];
 
-      // Subagent with custom name should get [🧵 Name] tag
+      // Subagent with custom name should get 🧵 Name tag
       const threadName = lastTopic.params.name as string;
-      expect(threadName).toMatch(/^\[🧵 Eve\]/);
+      expect(threadName).toMatch(/^🧵 Eve/);
     });
 
     it('should use thread emoji tag for task-type sessions', async () => {
@@ -273,9 +273,9 @@ describe('Deep Space Relay Integration Tests', () => {
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
       const lastTopic = topicCalls[topicCalls.length - 1];
 
-      // Task (subagent) should get thread emoji tag [🧵]
+      // Task (subagent) should get thread emoji tag 🧵
       const threadName = lastTopic.params.name as string;
-      expect(threadName).toMatch(/\[\uD83E\uDDF5/);
+      expect(threadName).toMatch(/\uD83E\uDDF5/);
     });
   });
 
@@ -372,7 +372,7 @@ describe('Deep Space Relay Integration Tests', () => {
 
       const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
       const lastMessage = messageCalls[messageCalls.length - 1];
-      // Thread messages should NOT have [Name] prefix — the thread title already shows the agent name
+      // Thread messages should NOT have Name prefix — the thread title already shows the agent name
       expect(lastMessage?.params.text).toBe('Hello with agent name!');
       expect(lastMessage?.params.message_thread_id).toBeDefined();
     });
@@ -1435,6 +1435,106 @@ describe('Deep Space Relay Integration Tests', () => {
       const editCalls = findCalls(mockTelegram.calls, 'editForumTopic');
       const customEdit = editCalls.find((c) => c.params.chat_id === projectChatId);
       expect(customEdit).toBeDefined();
+    });
+  });
+
+  describe('Set Chat (dsr_set_chat)', () => {
+    it('should switch session to a new chat and create thread there', async () => {
+      const sessionId = 'test-set-chat-001';
+      const title = 'Set Chat Test';
+      const newChatId = '-1009876543210';
+
+      await relay.register(sessionId, title);
+      await relay.send('Initial message in original chat');
+
+      // Verify thread was created in the original chat (TEST_CHAT_ID)
+      const topicCallsBefore = findCalls(mockTelegram.calls, 'createForumTopic');
+      expect(topicCallsBefore.length).toBe(1);
+      expect(topicCallsBefore[0].params.chat_id).toBe(TEST_CHAT_ID);
+
+      // Switch to new chat
+      const result = await relay.setChatId(newChatId);
+      expect(result.success).toBe(true);
+
+      // Verify a new thread was created in the new chat
+      const topicCallsAfter = findCalls(mockTelegram.calls, 'createForumTopic');
+      expect(topicCallsAfter.length).toBe(2);
+      expect(topicCallsAfter[1].params.chat_id).toBe(newChatId);
+    });
+
+    it('should send subsequent messages to the new chat after switching', async () => {
+      const sessionId = 'test-set-chat-002';
+      const title = 'Set Chat Messages Test';
+      const newChatId = '-1009876543211';
+
+      await relay.register(sessionId, title);
+      await relay.send('Message in old chat');
+
+      // Switch chat
+      await relay.setChatId(newChatId);
+
+      // Send message after switch
+      await relay.send('Message in new chat');
+
+      // Verify the new message went to the new chat
+      const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
+      const newChatMessages = messageCalls.filter(
+        (c) =>
+          c.params.chat_id === newChatId &&
+          (c.params.text as string)?.includes('Message in new chat')
+      );
+      expect(newChatMessages.length).toBe(1);
+    });
+
+    it('should update relay status chatId after switching', async () => {
+      const sessionId = 'test-set-chat-003';
+      const title = 'Set Chat Status Test';
+      const newChatId = '-1009876543212';
+
+      await relay.register(sessionId, title);
+
+      // Before switch
+      const statusBefore = relay.getStatus();
+      expect(statusBefore.chatId).not.toBe(newChatId);
+
+      // Switch
+      await relay.setChatId(newChatId);
+
+      // After switch
+      const statusAfter = relay.getStatus();
+      expect(statusAfter.chatId).toBe(newChatId);
+    });
+
+    it('should fail when not registered', async () => {
+      const unregisteredRelay = createTestRelay(daemon.socketPath);
+      const result = await unregisteredRelay.setChatId('-1001111111111');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Not registered');
+    });
+
+    it('should persist state after switching chat', async () => {
+      const sessionId = 'test-set-chat-persist-001';
+      const title = 'Set Chat Persist Test';
+      const newChatId = '-1009876543213';
+
+      await relay.register(sessionId, title);
+      await relay.send('Create thread');
+      await relay.setChatId(newChatId);
+
+      await sleep(100);
+
+      // Read state file and verify session now has new chatId
+      const { readFileSync } = await import('fs');
+      const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
+
+      const ourSession = stateData.sessions.find(
+        ([id, _info]: [string, any]) => id === sessionId
+      );
+      expect(ourSession).toBeDefined();
+
+      const [_id, info] = ourSession;
+      expect(info.chatId).toBe(newChatId);
+      expect(info.threadID).toBeDefined(); // New thread was created
     });
   });
 });

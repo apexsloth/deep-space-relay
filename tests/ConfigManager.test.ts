@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { ConfigManager } from '../src/daemon/config-manager';
-import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
+import { writeProjectConfig, loadConfig } from '../src/config';
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -57,5 +58,63 @@ describe('ConfigManager', () => {
     expect(content.field1).toBe('val1');
     expect(content.field2).toBe('val2');
     expect(content.field3).toBe('val3');
+  });
+});
+
+describe('writeProjectConfig', () => {
+  const projectDir = join(tmpdir(), `dsr-write-test-${Date.now()}`);
+  const configSubdir = '.opencode/deep-space-relay';
+  const configPath = join(projectDir, configSubdir, 'config.json');
+
+  beforeEach(() => {
+    if (!existsSync(projectDir)) {
+      mkdirSync(projectDir, { recursive: true });
+    }
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(projectDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it('should create config dir and write config.json', () => {
+    writeProjectConfig(projectDir, { chatId: '-1001234567890' });
+
+    expect(existsSync(configPath)).toBe(true);
+    const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(content.chatId).toBe('-1001234567890');
+  });
+
+  it('should merge with existing config', () => {
+    // Write initial config
+    writeProjectConfig(projectDir, { chatId: '-1001111111111' });
+
+    // Update with new chatId
+    writeProjectConfig(projectDir, { chatId: '-1002222222222' });
+
+    const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(content.chatId).toBe('-1002222222222');
+  });
+
+  it('should preserve existing fields when updating', () => {
+    // Create directory and write initial config with extra fields
+    const configDir = join(projectDir, configSubdir);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(configPath, JSON.stringify({ chatId: '-100111', customField: 'keep-me' }));
+
+    // Update chatId only
+    writeProjectConfig(projectDir, { chatId: '-100222' });
+
+    const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(content.chatId).toBe('-100222');
+    expect(content.customField).toBe('keep-me');
+  });
+
+  it('should be readable by loadConfig', () => {
+    writeProjectConfig(projectDir, { chatId: '-1009999999999' });
+
+    const config = loadConfig(projectDir);
+    expect(config.chatId).toBe('-1009999999999');
   });
 });

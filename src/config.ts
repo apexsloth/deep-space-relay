@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SECURE_DIR_MODE } from './constants';
 
@@ -141,6 +141,29 @@ export function loadConfig(projectPath?: string): DSRConfig {
   }
 
   return config;
+}
+
+/**
+ * Write/update project-level config.json (e.g. chatId)
+ * Creates the config directory if it doesn't exist.
+ *
+ * @param projectPath - Path to project root
+ * @param updates - Fields to merge into the existing config
+ */
+export function writeProjectConfig(projectPath: string, updates: Partial<DSRConfig>): void {
+  const configDir = join(projectPath, PROJECT_CONFIG_SUBDIR);
+  const configPath = join(configDir, 'config.json');
+
+  // Ensure directory exists
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true, mode: SECURE_DIR_MODE });
+  }
+
+  // Load existing config and merge updates
+  const existing = existsSync(configPath) ? loadJsonFile(configPath) : {};
+  const merged = { ...existing, ...updates };
+
+  writeFileSync(configPath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
 }
 
 /**

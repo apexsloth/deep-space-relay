@@ -1,6 +1,7 @@
 import { tool } from '@opencode-ai/plugin';
 import type { Relay } from './relay/core';
 import type { LogFn, PluginContext } from './types';
+import { writeProjectConfig } from './config';
 
 // ============================================================
 // TOOL DEFINITIONS
@@ -334,6 +335,35 @@ export function createTools(
           '</dsr_daemon_health>',
         ];
         return lines.join('\n');
+      },
+    }),
+
+    // Switch to a different Telegram chat
+    dsr_set_chat: tool({
+      description:
+        'Switch this session to a different Telegram chat/group. Creates a new thread in the target chat and persists the chatId to the project config so future sessions in this project use the same chat. The chatId should be a Telegram chat ID (e.g. "-1001234567890").',
+      args: {
+        chatId: tool.schema.string().describe('The Telegram chat ID to switch to (e.g. "-1001234567890")'),
+      },
+      async execute(args, ctx) {
+        const sessionId = (ctx as any)?.sessionID;
+        if (!sessionId) return 'Error: No session ID available';
+        const r = getRelay(sessionId);
+
+        // Persist to project config so future sessions use this chat
+        try {
+          writeProjectConfig(directory, { chatId: args.chatId });
+        } catch (err) {
+          log('Failed to write project config', 'warn', { error: String(err) });
+          return `Failed to write config: ${String(err)}`;
+        }
+
+        // Tell daemon to switch this session's chat
+        const result = await r.setChatId(args.chatId, ctx.abort);
+        if (result.success) {
+          return `Switched to chat ${args.chatId}. A new thread has been created in the target chat. Future sessions in this project will also use this chat.`;
+        }
+        return `Failed to switch chat: ${result.error}`;
       },
     }),
   };

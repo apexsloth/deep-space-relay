@@ -18,6 +18,7 @@ import {
   handleErrorNotification,
   handleHealth,
   handleUpdateMeta,
+  handleSetChat,
   type MessageHandlerContext,
 } from './handlers';
 import { MAX_BUFFER_SIZE, AUTH_CHECK_INTERVAL_MS } from '../constants';
@@ -228,6 +229,10 @@ export function createSocketServer(
 
             case 'health':
               handleHealth(msg, socket, ctx, daemonStartTime);
+              break;
+
+            case 'set_chat':
+              await handleSetChat(msg, socket, ctx, currentSessionID);
               break;
 
             default:

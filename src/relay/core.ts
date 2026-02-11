@@ -555,6 +555,30 @@ export function createRelay(config: RelayConfig) {
       }
     },
 
+    // Switch to a different Telegram chat (creates new thread in target chat)
+    async setChatId(
+      newChatId: string,
+      signal?: AbortSignal | null
+    ): Promise<{ success: boolean; error?: string }> {
+      if (!registered) {
+        return { success: false, error: 'Not registered. Call register() first.' };
+      }
+      try {
+        const response = await sendAndWait(
+          { type: 'set_chat', chatId: newChatId },
+          'set_chat',
+          'relay/core.ts:setChatId',
+          signal
+        );
+        if (response.success) {
+          chatId = newChatId;
+        }
+        return { success: response.success, error: response.error };
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    },
+
     // React to a message with an emoji (defaults to last message)
     async react(emoji: string): Promise<{ success: boolean; error?: string }> {
       if (!registered) {
