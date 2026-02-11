@@ -275,6 +275,13 @@ export function createMessageHandler(
         return;
       }
 
+      // Delete the /clear command itself immediately
+      try {
+        await bot.deleteMessage({ chat_id: msgChatId, message_id: message.message_id });
+      } catch (err) {
+        // Ignore
+      }
+
       const idsToDelete = session.messageIDs.slice(0, -limit).filter(id => id !== session.statusMessageID);
       let deletedCount = 0;
       
@@ -286,31 +293,30 @@ export function createMessageHandler(
             deletedCount++;
           }
         } catch (err) {
-          log(`[Commands] Failed to delete message ${id}: ${err}`, 'debug');
+          // Detect 48h limit error: "message can't be deleted for everyone"
+          if (String(err).includes("can't be deleted")) {
+            log(`[Commands] Message ${id} too old to delete`, 'debug');
+          } else {
+            log(`[Commands] Failed to delete message ${id}: ${err}`, 'debug');
+          }
         }
       }
 
       // Update session message IDs
-      session.messageIDs = session.messageIDs.filter(id => !idsToDelete.includes(id) || idsToDelete.indexOf(id) >= idsToDelete.length - limit);
-      // More accurate: just keep the ones we didn't try to delete or that failed?
-      // Actually, just keep the last 'limit' ones and the ones that failed if we really want accuracy.
-      // But keeping it simple:
       session.messageIDs = session.messageIDs.filter(id => !idsToDelete.includes(id));
       
       saveState(state, statePath);
 
-      // Delete the /clear command itself
-      try {
-        await bot.deleteMessage({ chat_id: msgChatId, message_id: message.message_id });
-      } catch (err) {
-        // Ignore
-      }
-
-      await bot.sendMessage({
+      const statusMsg = await bot.sendMessage({
         chat_id: chatId,
         message_thread_id: threadId,
         text: `🧹 Cleared ${deletedCount} messages (keeping last ${limit}).`,
       });
+
+      if (statusMsg.ok) {
+        addMessageID(session, statusMsg.result.message_id);
+        saveState(state, statePath);
+      }
       return;
     }
 

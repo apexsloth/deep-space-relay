@@ -69,6 +69,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
   let bot: TelegramClient | undefined;
   let server: ReturnType<typeof createSocketServer> | undefined;
   let pollingActive = false;
+  let lifecycle: LifecycleCoordinator;
 
   const cleanup = () => {
     log('Shutting down daemon', 'info');
@@ -79,7 +80,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
         server.close();
       } catch {}
     }
-    lifecycle.cleanupSocket();
+    if (lifecycle) lifecycle.cleanupSocket();
     // Remove PID file
     try {
       if (existsSync(PID_FILE)) {
@@ -127,23 +128,23 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
     // Try to load token from system token path
     try {
       const { SYSTEM_TOKEN_PATH } = require('./setup');
-      log(`Looking for token at: \${SYSTEM_TOKEN_PATH}`, 'debug');
+      log(`Looking for token at: ${SYSTEM_TOKEN_PATH}`, 'debug');
       if (existsSync(SYSTEM_TOKEN_PATH)) {
         const tokenData = JSON.parse(require('node:fs').readFileSync(SYSTEM_TOKEN_PATH, 'utf-8'));
         effectiveIpcToken = tokenData.token;
         log(
-          `Loaded IPC token for force takeover (\${effectiveIpcToken ? 'found' : 'empty'})`,
+          `Loaded IPC token for force takeover (${effectiveIpcToken ? 'found' : 'empty'})`,
           'debug'
         );
       } else {
-        log(`Token file not found: \${SYSTEM_TOKEN_PATH}`, 'debug');
+        log(`Token file not found: ${SYSTEM_TOKEN_PATH}`, 'debug');
       }
     } catch (err) {
-      log(`Could not load token for force takeover: \${err}`, 'warn');
+      log(`Could not load token for force takeover: ${err}`, 'warn');
     }
   }
 
-  const lifecycle = new LifecycleCoordinator({
+  lifecycle = new LifecycleCoordinator({
     socketPath,
     standbyRetryMs,
     forceMode,
@@ -154,15 +155,13 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
   });
 
   let leaderStarted = false;
-  // server and bot moved to top of function for cleanup access
   const startLeader = async (reason: string) => {
-
     if (leaderStarted) return;
     leaderStarted = true;
     onLeader(reason);
 
     try {
-      log(`Starting Leader services (reason: \${reason})`, 'info');
+      log(`Starting Leader services (reason: ${reason})`, 'info');
 
       log('Loading configuration', 'debug');
       let config: { token?: string; chatId?: string; ipcToken?: string };
@@ -194,7 +193,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
 
       const { valid, missing } = validateConfig(config);
       if (!testMode && !valid) {
-        throw new Error(`Missing configuration: \${missing.join(', ')}`);
+        throw new Error(`Missing configuration: ${missing.join(', ')}`);
       }
 
       let chatId = config.chatId || '';
@@ -250,7 +249,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
           ipcToken
         );
         server.on('error', (err: any) => {
-          log(`Socket server error: \${err.message}`, 'error');
+          log(`Socket server error: ${err.message}`, 'error');
           if (!server?.listening) {
             leaderStarted = false;
             lifecycle.reportLeaderFailure(err);
@@ -292,12 +291,12 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
       // Write PID file for force takeover
       try {
         writeFileSync(PID_FILE, String(process.pid));
-        log(`PID file written: \${PID_FILE}`, 'debug');
+        log(`PID file written: ${PID_FILE}`, 'debug');
       } catch (err) {
-        log(`Failed to write PID file: \${err}`, 'warn');
+        log(`Failed to write PID file: ${err}`, 'warn');
       }
 
-      configureBot(bot, chatId).catch((err) => log(`Bot config failed: \${err}`, 'error'));
+      configureBot(bot, chatId).catch((err) => log(`Bot config failed: ${err}`, 'error'));
       bot.on(
         'message',
         createMessageHandler(bot, state, statePath, configManager, getChatId, setChatId)
@@ -342,7 +341,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
       onReady(true, socketPath);
     } catch (err: any) {
       leaderStarted = false;
-      log(`Failed to start Leader services: \${err.message}`, 'error');
+      log(`Failed to start Leader services: ${err.message}`, 'error');
       lifecycle.reportLeaderFailure(err);
     }
   };
