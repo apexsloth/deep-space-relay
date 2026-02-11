@@ -190,7 +190,6 @@ export function createTools(
           const sessionData = await client.session.get({
             path: { id: sessionId },
             query: { directory },
-            signal: ctx.abort,
           });
           sessionTitle = sessionData.data?.title;
         } catch (err) {

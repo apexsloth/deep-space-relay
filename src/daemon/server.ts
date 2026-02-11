@@ -58,7 +58,6 @@ export function createSocketServer(
     socket.on('data', async (data) => {
       buffer += data.toString();
 
-      // SECURITY: Check buffer size limit to prevent memory exhaustion
       if (buffer.length > MAX_BUFFER_SIZE) {
         log('[Daemon] Buffer size limit exceeded, disconnecting client', 'warn', {
           bufferSize: buffer.length,
@@ -76,6 +75,13 @@ export function createSocketServer(
 
         try {
           const msg = JSON.parse(line);
+
+          // Skip logging for high-frequency or internal commands
+          const isHighFreq = msg.type === 'set_status' || msg.type === 'update_meta' || msg.type === 'ping' || msg.type === 'auth';
+          
+          if (!isHighFreq) {
+            log('[Daemon] Socket data received', 'debug', { size: line.length, type: msg.type });
+          }
 
           if (!authenticated) {
             // Allow ping to bypass auth for leader health checks.

@@ -229,7 +229,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
         project: string,
         title: string,
         sessionChatId?: string
-      ) => ensureThread(sessionID, project, title, state, statePath, bot, sessionChatId || chatId);
+      ) => ensureThread(sessionID, project, title, state, statePath, bot!, sessionChatId || chatId);
 
       const getListenOptions = () => {
         if (/^\d+$/.test(socketPath)) {
@@ -243,7 +243,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
           socketPath,
           state,
           statePath,
-          bot,
+          bot!,
           getChatId,
           boundEnsureThread,
           ipcToken
@@ -306,6 +306,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
 
       if (!testMode) {
         pollingActive = true;
+        log(`[Daemon] Starting manual polling loop (chatId: ${chatId})`, 'info');
         (async () => {
           let offset = 0;
           let errorBackoffMs = POLLING_INITIAL_BACKOFF_MS;
@@ -316,8 +317,20 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
                 timeout: 50,
                 allowed_updates: ['message', 'callback_query', 'message_reaction'] as any,
               });
+              if (updates.length > 0) {
+                log(`[Daemon] Received ${updates.length} updates`, 'debug');
+              }
               for (const update of updates) {
-                await bot.processUpdate(update);
+                try {
+                  log(`[Daemon] Processing update ${update.update_id}`, 'debug');
+                  await bot.processUpdate(update);
+                } catch (updateErr) {
+                  log(`Error processing update ${update.update_id}`, 'error', { 
+                    error: String(updateErr),
+                    updateId: update.update_id
+                  });
+                }
+                // Always advance offset to avoid stuck loop on poison pill updates
                 offset = update.update_id + 1;
               }
               // Reset backoff on successful poll

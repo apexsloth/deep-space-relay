@@ -95,14 +95,28 @@ export function createMessageHandler(
     });
 
   return async (message: TelegramMessage) => {
-    const chatId = getChatId();
-    log(`[Daemon] Incoming message: ${message.text}`, 'info', {
-      chatId: message.chat.id,
-      threadId: message.message_thread_id,
-    });
-    const msgChatId = String(message.chat.id);
-    let text = message.text || '';
-    const threadId = message.message_thread_id;
+    try {
+      if (!message) {
+        log('[Daemon] Received empty message', 'warn');
+        return;
+      }
+      
+      const chatId = getChatId();
+      // Guard against missing chat object which would cause crash on access
+      if (!message.chat || !message.chat.id) {
+        log('[Daemon] Message missing chat information', 'warn', { msgId: message.message_id });
+        return;
+      }
+
+      const msgChatId = String(message.chat.id);
+      let text = message.text || '';
+      const threadId = message.message_thread_id;
+
+      log(`[Daemon] Incoming: "${text}"`, 'info', {
+        chatId: msgChatId,
+        threadId,
+        msgId: message.message_id
+      });
 
     // Strip bot username suffix (e.g., /list@BotName -> /list)
     if (botUsername && text.includes(`@${botUsername}`)) {
@@ -150,13 +164,20 @@ export function createMessageHandler(
       return;
     }
 
+    // Global commands should work regardless of whether chat has active sessions
+    const globalCommands = ['/list', '/list_all', '/cleanup', '/all'];
+    const isGlobalCommand = globalCommands.includes(text);
+
     // Daemon is a pure router - only accept messages from chats that have registered sessions
-    const isKnownProjectChat = Array.from(state.sessions.values()).some(
-      (s) => String(s.chatId) === String(msgChatId)
-    );
-    if (!isKnownProjectChat) {
-      log(`[Daemon] Ignoring message from unknown chat: ${msgChatId}`, 'info');
-      return;
+    // However, global commands should bypass this check
+    if (!isGlobalCommand) {
+      const isKnownProjectChat = Array.from(state.sessions.values()).some(
+        (s) => String(s.chatId) === String(msgChatId)
+      );
+      if (!isKnownProjectChat) {
+        log(`[Daemon] Ignoring message from unknown chat: ${msgChatId}`, 'info');
+        return;
+      }
     }
 
     if (text === '/stop' && threadId) {
@@ -166,7 +187,7 @@ export function createMessageHandler(
       if (sessionID && sendToClient(state.clients, sessionID, { type: 'stop' })) {
         try {
           await bot.setMessageReaction({
-            chat_id: chatId,
+            chat_id: msgChatId,
             message_id: message.message_id,
             reaction: [{ type: 'emoji', emoji: '\uD83D\uDC4D' }],
           });
@@ -180,6 +201,7 @@ export function createMessageHandler(
 
     if (text === '/cleanup') {
       let deleted = 0;
+      const sessionsToDelete: string[] = [];
       for (const [sid, session] of state.sessions.entries()) {
         if (!state.clients.has(sid) && session.threadID && session.chatId) {
           try {
@@ -189,13 +211,17 @@ export function createMessageHandler(
             });
             state.threadToSession.delete(`${session.chatId}:${session.threadID}`);
             state.threadToSession.delete(String(session.threadID)); // Legacy cleanup
-            state.sessions.delete(sid);
+            sessionsToDelete.push(sid);
             deleted++;
           } catch (err) {
             // Thread deletion failed, log and continue with cleanup
             log(`[Commands] Failed to delete thread for session ${sid}: ${err}`, 'warn');
           }
         }
+      }
+      // Delete sessions after iteration to avoid modifying Map during iteration
+      for (const sid of sessionsToDelete) {
+        state.sessions.delete(sid);
       }
       if (deleted > 0) saveState(state, statePath);
       await bot.sendMessage({
@@ -245,7 +271,7 @@ export function createMessageHandler(
     if (text.startsWith('/clear')) {
       if (!threadId) {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           text: `Please use /clear inside an agent's thread. Usage: /clear [N]`,
         });
         return;
@@ -256,7 +282,7 @@ export function createMessageHandler(
       const session = sid ? state.sessions.get(sid) : null;
       if (!session) {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           message_thread_id: threadId,
           text: 'Session info not found for this thread.',
         });
@@ -267,7 +293,7 @@ export function createMessageHandler(
       const limit = args[1] ? parseInt(args[1], 10) : 10;
       if (isNaN(limit) || limit < 0) {
         await bot.sendMessage({
-          chat_id: chatId,
+          chat_id: msgChatId,
           message_thread_id: threadId,
           text: 'Invalid limit. Usage: `/clear [N]`',
           parse_mode: 'Markdown',
@@ -555,6 +581,18 @@ export function createMessageHandler(
         threadToSessionSize: state.threadToSession.size,
       });
       if (sid) {
+        // Acknowledge message receipt immediately for better UX
+        try {
+          await bot.setMessageReaction({
+            chat_id: msgChatId,
+            message_id: message.message_id,
+            reaction: [{ type: 'emoji', emoji: '✉️' }],
+          });
+        } catch (err) {
+          // Reaction is non-critical
+          log(`[Commands] Failed to acknowledge message: ${err}`, 'debug');
+        }
+
         const session = state.sessions.get(sid);
         if (session) {
           session.lastMessageID = message.message_id;
@@ -627,6 +665,9 @@ export function createMessageHandler(
           saveState(state, statePath);
         }
       }
+    }
+    } catch (err) {
+      log(`[Daemon] Error processing message: ${err}`, 'error', { messageId: message?.message_id });
     }
   };
 }

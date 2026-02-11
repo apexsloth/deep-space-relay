@@ -49,15 +49,15 @@ describe('ConfigManager', () => {
 
     // Start multiple updates simultaneously
     await Promise.all([
-      manager.updateConfig({ field1: 'val1' }),
-      manager.updateConfig({ field2: 'val2' }),
-      manager.updateConfig({ field3: 'val3' }),
+      manager.updateConfig({ token: 'val1' }),
+      manager.updateConfig({ chatId: 'val2' }),
+      manager.updateConfig({ ipcToken: 'val3' }),
     ]);
 
     const content = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(content.field1).toBe('val1');
-    expect(content.field2).toBe('val2');
-    expect(content.field3).toBe('val3');
+    expect(content.token).toBe('val1');
+    expect(content.chatId).toBe('val2');
+    expect(content.ipcToken).toBe('val3');
   });
 });
 

@@ -354,45 +354,63 @@ export async function handleSend(
       correlationId,
     });
   } catch (err) {
-    // Try to recover from stale thread
-    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
-    if (recovered && session.threadID) {
-      try {
-        const text = msg.text;
-        let result = await bot.sendMessage({
-          chat_id: session.chatId,
-          message_thread_id: session.threadID,
-          text,
-          parse_mode: 'Markdown',
-        });
-        if (!result.ok && result.description?.includes("can't parse entities")) {
-          result = await bot.sendMessage({
+    const errorStr = String(err);
+    
+    // Check if this is a stale thread error
+    if (errorStr.includes('message thread not found') || errorStr.includes('thread not found')) {
+      log(`[Daemon] Thread ${session.threadID} not found, recreating...`, 'info');
+      const recovered = await recoverStaleThread(err, session, ctx, sessionID);
+      
+      if (recovered && session.threadID) {
+        try {
+          const text = msg.text;
+          let result = await bot.sendMessage({
             chat_id: session.chatId,
             message_thread_id: session.threadID,
             text,
+            parse_mode: 'Markdown',
           });
+          if (!result.ok && result.description?.includes("can't parse entities")) {
+            result = await bot.sendMessage({
+              chat_id: session.chatId,
+              message_thread_id: session.threadID,
+              text,
+            });
+          }
+          if (!result.ok) throw new Error(result.description);
+
+          session.lastMessageID = result.result.message_id;
+          addMessageID(session, result.result.message_id);
+          saveState(state, statePath);
+
+          log(`[Daemon] Message sent to new thread ${session.threadID}`, 'info');
+          sendToClient(state.clients, sessionID, {
+            type: 'sent',
+            success: true,
+            messageID: result.result.message_id,
+            correlationId,
+          });
+          return;
+        } catch (retryErr) {
+          log(`[Daemon] Retry send failed after thread recovery: ${retryErr}`, 'error');
+          sendToClient(state.clients, sessionID, {
+            type: 'sent',
+            success: false,
+            correlationId,
+            error: String(retryErr),
+          });
+          return;
         }
-        if (!result.ok) throw new Error(result.description);
-        session.lastMessageID = result.result.message_id;
-        addMessageID(session, result.result.message_id);
-        saveState(state, statePath);
-        sendToClient(state.clients, sessionID, {
-          type: 'sent',
-          success: true,
-          messageID: result.result.message_id,
-          correlationId,
-        });
-        return;
-      } catch (retryErr) {
-        log(`[Daemon] Failed to send after thread recovery: ${retryErr}`, 'error');
       }
     }
-    log(`[Daemon] Failed to send: ${err}`, 'error');
+    
+    // For other errors or if recovery failed
+    log(`[Daemon] Failed to send message: ${err}`, 'error');
     sendToClient(state.clients, sessionID, {
       type: 'sent',
       success: false,
-      error: String(err),
       correlationId,
+      error: errorStr,
     });
   }
 }

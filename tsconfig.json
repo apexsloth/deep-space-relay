@@ -7,6 +7,7 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "downlevelIteration": true,
     "allowImportingTsExtensions": true,
     "types": ["bun-types"]
   }

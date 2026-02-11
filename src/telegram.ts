@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { log } from './daemon/logger';
 import {
   MS_PER_SECOND,
   HTTP_TOO_MANY_REQUESTS,
@@ -155,6 +156,7 @@ export class TelegramClient extends EventEmitter {
   async startPolling(timeout: number = 50) {
     if (this.isPolling) return;
     this.isPolling = true;
+    this.onError(`[Telegram] Starting polling loop (offset: ${this.offset})`);
 
     while (this.isPolling) {
       try {
@@ -183,6 +185,7 @@ export class TelegramClient extends EventEmitter {
   }
 
   private handleUpdate(update: Update) {
+    log(`[Telegram] Incoming update: ${JSON.stringify(update)}`, 'debug');
     if (update.message) {
       this.emit('message', update.message);
     }
@@ -222,6 +225,9 @@ export class TelegramClient extends EventEmitter {
   }
   async editMessageText(params: any) {
     return this.callApi('editMessageText', params);
+  }
+  async editMessageReplyMarkup(params: any) {
+    return this.callApi('editMessageReplyMarkup', params);
   }
   async getChat(params: any) {
     return this.callApi('getChat', params);

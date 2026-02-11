@@ -39,6 +39,10 @@ export interface MockTelegramServer {
   nextThreadId: number;
   // Message ID counter
   nextMessageId: number;
+  // Pending reaction for testing reaction notifications (stores full Telegram update object)
+  _pendingReaction: { update_id: number; message_reaction: Record<string, unknown> } | undefined;
+  // Pending callback query for testing button presses (stores full Telegram update object)
+  _pendingCallbackQuery: { update_id: number; callback_query: Record<string, unknown> } | undefined;
 }
 
 export function createMockTelegramServer(): MockTelegramServer {
@@ -165,10 +169,10 @@ export function createMockTelegramServer(): MockTelegramServer {
           // Return pending update if any, otherwise empty
           if (mockServer._pendingReaction) {
             result = { ok: true, result: [mockServer._pendingReaction] };
-            mockServer._pendingReaction = null;
+            mockServer._pendingReaction = undefined;
           } else if (mockServer._pendingCallbackQuery) {
             result = { ok: true, result: [mockServer._pendingCallbackQuery] };
-            mockServer._pendingCallbackQuery = null;
+            mockServer._pendingCallbackQuery = undefined;
           } else {
             result = { ok: true, result: [] };
           }

@@ -28,7 +28,7 @@ async function main() {
   await runDaemon({
     socketPath,
     statePath,
-    projectPath,
+    projectPath: projectPath || '',
     configPath,
     testMode,
     forceMode,

@@ -134,7 +134,7 @@ export class LifecycleCoordinator extends EventEmitter {
           this.log('warn', 'Leader did not acknowledge shutdown');
         }
       }
-      await this.cleanupSocket();
+      await this.cleanupSocket(true);
       this.transition('leading', { reason: 'startup', forced: true });
       return;
     }
@@ -143,7 +143,7 @@ export class LifecycleCoordinator extends EventEmitter {
     // Consider atomic socket bind or file lock for proper leader election.
     const leaderAlive = await this.checkLeaderAlive();
 
-    if (this.state === 'shutting_down' || this.signal?.aborted) return;
+    if (this.getState() === 'shutting_down' || this.signal?.aborted) return;
 
     if (leaderAlive) {
       this.transition('standby');
@@ -154,19 +154,21 @@ export class LifecycleCoordinator extends EventEmitter {
   }
 
   private scheduleStandbyCheck() {
-    if (this.state !== 'standby' || this.signal?.aborted || this.state === 'shutting_down') return;
+    // Early exit if not in standby or shutting down
+    if (this.state !== 'standby' || this.signal?.aborted) return;
 
     if (this.standbyTimer) clearTimeout(this.standbyTimer);
 
     this.standbyTimer = setTimeout(async () => {
-      if (this.state !== 'standby' || this.signal?.aborted || this.state === 'shutting_down')
-        return;
+      // Re-check state after async boundary
+      const currentState = this.state;
+      if (currentState !== 'standby' || this.signal?.aborted) return;
 
       this.log('debug', 'Performing standby health check');
       const leaderAlive = await this.checkLeaderAlive();
 
-      if (this.state !== 'standby' || this.signal?.aborted || this.state === 'shutting_down')
-        return;
+      // Re-check state after another async boundary
+      if (this.state !== 'standby' || this.signal?.aborted) return;
 
       if (!leaderAlive) {
         this.log('info', 'Leader lost, attempting takeover');
@@ -291,8 +293,8 @@ export class LifecycleCoordinator extends EventEmitter {
     });
   }
 
-  public cleanupSocket() {
-    if (this.state !== 'leading') {
+  public cleanupSocket(force: boolean = false) {
+    if (this.state !== 'leading' && !force) {
       this.log('debug', `Skipping socket cleanup: state is ${this.state} (not leading)`);
       return;
     }

@@ -19,7 +19,8 @@ const extractNameFromPath = (path?: string): string | undefined => {
   return path.split('/').filter(Boolean).pop();
 };
 
-export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const DeepSpaceRelay = (async (ctx: PluginContext) => {
   const { directory, worktree, project, client } = ctx;
   // Priority: worktree name > project.worktree name > directory name > 'Project'
   // project.id is a git SHA hash, not useful for display
@@ -94,7 +95,7 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
             // Get agent from last user message
             const lastUserMessage = messages.filter((m: any) => m.info?.role === 'user').pop();
             if (lastUserMessage?.info?.agent) {
-              currentAgent = lastUserMessage.info.agent;
+              currentAgent = lastUserMessage.info.agent as string;
             }
 
             // Get model from last assistant message
@@ -103,8 +104,8 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
               .pop();
             if (lastAssistantMessage?.info?.providerID && lastAssistantMessage?.info?.modelID) {
               currentModel = {
-                providerID: lastAssistantMessage.info.providerID,
-                modelID: lastAssistantMessage.info.modelID,
+                providerID: lastAssistantMessage.info.providerID as string,
+                modelID: lastAssistantMessage.info.modelID as string,
               };
             }
           } catch (err) {
@@ -187,11 +188,11 @@ export const DeepSpaceRelay: Plugin = async (ctx: PluginContext) => {
   // See: https://github.com/anomalyco/opencode/issues/TBD
 
   return {
-    tool: tools,
-    event: eventHandler,
+    tools: tools,
+    events: eventHandler,
     'permission.ask': permissionHandler,
   };
-};
+}) as unknown as Plugin;
 
 export default DeepSpaceRelay;
 

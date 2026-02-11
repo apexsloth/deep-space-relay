@@ -147,6 +147,7 @@ export interface TelegramMessage {
   text?: string;
   chat: { id: number | string };
   message_thread_id?: number;
+  reply_to_message?: TelegramMessage;
   forum_topic_created?: boolean;
   forum_topic_edited?: boolean;
 }
