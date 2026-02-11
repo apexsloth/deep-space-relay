@@ -66,6 +66,61 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
     logFile,
   });
 
+  let bot: TelegramClient | undefined;
+  let server: ReturnType<typeof createSocketServer> | undefined;
+  let pollingActive = false;
+
+  const cleanup = () => {
+    log('Shutting down daemon', 'info');
+    pollingActive = false;
+    if (bot) bot.stopPolling(); // Stop any active polling
+    if (server) {
+      try {
+        server.close();
+      } catch {}
+    }
+    lifecycle.cleanupSocket();
+    // Remove PID file
+    try {
+      if (existsSync(PID_FILE)) {
+        log(`Removing PID file: ${PID_FILE}`, 'debug');
+        unlinkSync(PID_FILE);
+      }
+    } catch (err) {
+      // Best-effort cleanup during shutdown, continue anyway
+      log(`Could not remove PID file during shutdown: ${err}`, 'debug');
+    }
+    logCleanup?.();
+    // Force exit after brief delay - polling may be stuck in long-poll
+    setTimeout(() => {
+      log('Shutdown complete, exiting', 'info');
+      process.exit(0);
+    }, SHORT_DELAY_MS);
+  };
+
+  const handleSignal = () => {
+    log('Received shutdown signal', 'info');
+    cleanup();
+  };
+
+  // Register signal handlers early to ensure graceful shutdown even during startup
+  if (signal) {
+    signal.addEventListener('abort', cleanup, { once: true });
+  } else {
+    process.once('SIGINT', handleSignal);
+    process.once('SIGTERM', handleSignal);
+  }
+
+  // Attach crash handlers
+  process.once('uncaughtException', (err) => {
+    log('Uncaught exception, shutting down', 'error', { error: String(err) });
+    cleanup();
+  });
+  process.once('unhandledRejection', (reason) => {
+    log('Unhandled rejection, shutting down', 'error', { reason: String(reason) });
+    cleanup();
+  });
+
   // For force mode, we need the IPC token early to shutdown the existing leader
   let effectiveIpcToken = ipcTokenOverride;
   if (forceMode && !effectiveIpcToken) {
@@ -99,11 +154,9 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
   });
 
   let leaderStarted = false;
-  let server: ReturnType<typeof createSocketServer> | undefined;
-  let pollingActive = false;
-  let bot: TelegramClient | undefined;
-
+  // server and bot moved to top of function for cleanup access
   const startLeader = async (reason: string) => {
+
     if (leaderStarted) return;
     leaderStarted = true;
     onLeader(reason);
@@ -304,66 +357,13 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
     onStandby(standbyRetryMs);
   });
 
-  const cleanup = () => {
-    log('Shutting down daemon', 'info');
-    pollingActive = false;
-    if (bot) bot.stopPolling(); // Stop any active polling
-    if (server) {
-      try {
-        server.close();
-      } catch {}
-    }
-    lifecycle.cleanupSocket();
-    // Remove PID file
-    try {
-      if (existsSync(PID_FILE)) {
-        log(`Removing PID file: \${PID_FILE}`, 'debug');
-        unlinkSync(PID_FILE);
-      }
-    } catch (err) {
-      // Best-effort cleanup during shutdown, continue anyway
-      log(`Could not remove PID file during shutdown: ${err}`, 'debug');
-    }
-    logCleanup?.();
-    // Force exit after brief delay - polling may be stuck in long-poll
-    setTimeout(() => process.exit(0), SHORT_DELAY_MS);
-  };
-
-  // Attach crash handlers
-  process.once('uncaughtException', (err) => {
-    log('Uncaught exception, shutting down', 'error', { error: String(err) });
-    cleanup();
-  });
-  process.once('unhandledRejection', (reason) => {
-    log('Unhandled rejection, shutting down', 'error', { reason: String(reason) });
-    cleanup();
-  });
-
-  if (signal) {
-    signal.addEventListener('abort', cleanup, { once: true });
-  }
-
   await lifecycle.start();
 
-  // Wait for signal or keep process alive
-  if (signal) {
-    if (signal.aborted) {
-      cleanup();
-    } else {
-      await new Promise((resolve) => {
-        signal.addEventListener('abort', resolve, { once: true });
-      });
-    }
-  } else {
-    await new Promise((resolve) => {
-      const handleSignal = () => {
-        cleanup();
-        resolve(null);
-      };
-      process.on('SIGINT', handleSignal);
-      process.on('SIGTERM', handleSignal);
-    });
-  }
+  // Keep process alive until signal
+  await new Promise(() => {
+    // This promise never resolves, process is kept alive by socket server and polling
+    // Shutdown is handled by signal/abort listeners calling cleanup() and process.exit()
+  });
 }
 
 export function createDaemonController(): AbortController {
