@@ -134,7 +134,7 @@ export function createMessageHandler(
          const renameResult = await handleSetAgentName(
           { name: text, sessionID: sid },
           null,
-          { state, statePath, bot, chatId: msgChatId, ensureThread: async () => undefined },
+          { state, statePath, bot, chatId: msgChatId, reconcile: async () => undefined },
           sid
         );
         if (renameResult === false) {
@@ -453,7 +453,7 @@ export function createMessageHandler(
         await handleSetAgentName(
           { name: newName, sessionID: sid },
           null,
-          { state, statePath, bot, chatId: msgChatId, ensureThread: async () => undefined },
+          { state, statePath, bot, chatId: msgChatId, reconcile: async () => undefined },
           sid
         );
         await bot.sendMessage({
@@ -568,7 +568,6 @@ export function createMessageHandler(
         const session = state.sessions.get(sid);
         if (
           String(session?.chatId) === String(msgChatId) &&
-          session?.threadID &&
           !session?.parentID
         ) {
           sendToClient(state.clients, sid, {

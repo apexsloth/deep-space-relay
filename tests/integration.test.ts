@@ -122,7 +122,7 @@ describe('Deep Space Relay Integration Tests', () => {
       expect(relay.getState().sessionID).toBe(sessionId);
     });
 
-    it('should not create thread on registration (lazy creation)', async () => {
+    it('should create thread eagerly on registration for main agents', async () => {
       const sessionId = 'test-session-002';
       const title = 'Test Session';
 
@@ -131,28 +131,28 @@ describe('Deep Space Relay Integration Tests', () => {
       // Give time for any async operations
       await sleep(100);
 
-      // Verify no createForumTopic call was made during registration
+      // Main agents get thread created eagerly during registration
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
-      expect(topicCalls.length).toBe(0);
+      expect(topicCalls.length).toBe(1);
     });
   });
 
   describe('Lazy Thread Creation', () => {
-    it('should create thread on first send (dsr_send triggers ensureThread)', async () => {
+    it('should reuse eagerly created thread on first send (no duplicate thread)', async () => {
       const sessionId = 'test-session-lazy-001';
       const title = 'Lazy Thread Test';
 
       await relay.register(sessionId, title);
 
-      // Verify no thread created yet
-      expect(findCalls(mockTelegram.calls, 'createForumTopic').length).toBe(0);
+      // Thread already created eagerly for main agents
+      expect(findCalls(mockTelegram.calls, 'createForumTopic').length).toBe(1);
 
-      // Send a message - this should trigger thread creation
+      // Send a message - should NOT create another thread
       const sendResult = await relay.send('Hello from test!');
 
       expect(sendResult.success).toBe(true);
 
-      // Verify thread was created
+      // Still only 1 thread (from registration, not from send)
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
       expect(topicCalls.length).toBe(1);
       expect(topicCalls[0].params.name).toContain('Lazy Thread Test');
@@ -207,16 +207,21 @@ describe('Deep Space Relay Integration Tests', () => {
       const title = 'Main Agent Named';
 
       await relay.register(sessionId, title);
-      await relay.setAgentName('Wall-E');
-      // Need to send a message to trigger thread creation with the name
-      await sleep(50);
-      await relay.send('Test message');
-
+      // Thread created eagerly at register with random name
       const topicCalls = findCalls(mockTelegram.calls, 'createForumTopic');
       expect(topicCalls.length).toBe(1);
 
+      await relay.setAgentName('Wall-E');
+      await sleep(50);
+      await relay.send('Test message');
+
+      // After setAgentName, thread is renamed via editForumTopic
+      const editCalls = findCalls(mockTelegram.calls, 'editForumTopic');
+      expect(editCalls.length).toBeGreaterThan(0);
+
       // Main agent with name should get Name tag (no emoji)
-      const threadName = topicCalls[0].params.name as string;
+      const lastEdit = editCalls[editCalls.length - 1];
+      const threadName = lastEdit.params.name as string;
       expect(threadName).toMatch(/^Wall-E TestProject/);
     });
 
@@ -380,30 +385,18 @@ describe('Deep Space Relay Integration Tests', () => {
   });
 
   describe('Typing Indicator', () => {
-    it('should only send typing indicator after thread exists', async () => {
+    it('should send typing indicator immediately for main agents (eager thread creation)', async () => {
       const sessionId = 'test-typing-001';
       const title = 'Typing Test';
 
       await relay.register(sessionId, title);
 
-      // Before thread creation (typing indicator should be ignored by daemon)
+      // With eager thread creation, typing indicator works immediately
       await relay.sendTyping();
       await sleep(100);
-      const actionCallsBefore = findCalls(mockTelegram.calls, 'sendChatAction');
-      expect(actionCallsBefore.length).toBe(0);
-
-      // Create thread
-      await relay.send('First message to create thread');
-      await sleep(100);
-
-      // Now typing indicator should work
-      await relay.sendTyping();
-      await sleep(100);
-
-      // Verify sendChatAction was called
-      const actionCallsAfter = findCalls(mockTelegram.calls, 'sendChatAction');
-      expect(actionCallsAfter.length).toBeGreaterThan(0);
-      expect(actionCallsAfter[0].params.action).toBe('typing');
+      const actionCalls = findCalls(mockTelegram.calls, 'sendChatAction');
+      expect(actionCalls.length).toBeGreaterThan(0);
+      expect(actionCalls[actionCalls.length - 1].params.action).toBe('typing');
     });
   });
 
@@ -653,20 +646,18 @@ describe('Deep Space Relay Integration Tests', () => {
   });
 
   describe('hasThread State After Thread Creation', () => {
-    it('should set hasThread to true after dsr_send triggers thread creation', async () => {
+    it('should set hasThread to true after eager thread creation on register', async () => {
       const sessionId = 'test-hasthread-001';
       const title = 'hasThread Test';
 
       await relay.register(sessionId, title);
 
-      // Before sending, hasThread should be false (lazy thread creation)
-      expect(relay.getState().hasThread).toBe(false);
+      // With eager thread creation for main agents, hasThread is true immediately
+      expect(relay.getState().hasThread).toBe(true);
 
-      // Send a message - this triggers thread creation
+      // Send a message - hasThread remains true
       const sendResult = await relay.send('Hello to create thread');
       expect(sendResult.success).toBe(true);
-
-      // After successful send, hasThread must be true
       expect(relay.getState().hasThread).toBe(true);
     });
 
@@ -675,7 +666,7 @@ describe('Deep Space Relay Integration Tests', () => {
       const title = 'hasThread Persistence Test';
 
       await relay.register(sessionId, title);
-      expect(relay.getState().hasThread).toBe(false);
+      expect(relay.getState().hasThread).toBe(true);
 
       await relay.send('Message 1');
       expect(relay.getState().hasThread).toBe(true);
@@ -692,9 +683,9 @@ describe('Deep Space Relay Integration Tests', () => {
       const title = 'hasThread Reply Test';
 
       await relay.register(sessionId, title);
-      expect(relay.getState().hasThread).toBe(false);
+      expect(relay.getState().hasThread).toBe(true);
 
-      // Send first message to create thread and get a message ID
+      // Send first message to get a message ID
       await relay.send('Original message');
       const msgId = relay.getState().lastMessageID;
       expect(msgId).toBeDefined();
@@ -704,7 +695,7 @@ describe('Deep Space Relay Integration Tests', () => {
       // (simulates a relay that reconnected and lost state)
       const relay2 = createTestRelay(daemon.socketPath);
       await relay2.register(sessionId + '-2', title);
-      expect(relay2.getState().hasThread).toBe(false);
+      expect(relay2.getState().hasThread).toBe(true);
 
       // Send to create thread for relay2 as well
       await relay2.send('Creating thread for relay2');
@@ -720,9 +711,10 @@ describe('Deep Space Relay Integration Tests', () => {
       });
 
       await relayWithCallback.register(sessionId, title);
-      expect(relayWithCallback.getState().hasThread).toBe(false);
+      // With eager thread creation, hasThread is true right after register
+      expect(relayWithCallback.getState().hasThread).toBe(true);
 
-      // Send a message to create thread (this triggers thread_created notification)
+      // Send a message
       await relayWithCallback.send('Test message');
       expect(relayWithCallback.getState().hasThread).toBe(true);
 

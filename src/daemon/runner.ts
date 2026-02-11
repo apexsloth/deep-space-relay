@@ -9,13 +9,13 @@ import { log, configureLogger, type LogLevel } from './logger';
 import {
   createState,
   createSocketServer,
-  ensureThread,
   configureBot,
   createMessageHandler,
   createCallbackQueryHandler,
   createReactionHandler,
   cleanupOldSessions,
 } from './index';
+import { reconcile } from './reconciler';
 import { ConfigManager } from './config-manager';
 import { SYSTEM_TOKEN_PATH } from './setup';
 import type { DaemonRunOptions } from './worker-types';
@@ -221,12 +221,8 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
       const setChatId = (id: string) => {
         chatId = id;
       };
-      const boundEnsureThread = (
-        sessionID: string,
-        project: string,
-        title: string,
-        sessionChatId?: string
-      ) => ensureThread(sessionID, project, title, state, statePath, bot!, sessionChatId || chatId);
+      const boundReconcile = (sessionID: string) =>
+        reconcile(sessionID, state, statePath, bot!, chatId);
 
       const getListenOptions = () => {
         if (/^\d+$/.test(socketPath)) {
@@ -242,7 +238,7 @@ export async function runDaemon(options: DaemonRunOptions): Promise<void> {
           statePath,
           bot!,
           getChatId,
-          boundEnsureThread,
+          boundReconcile,
           ipcToken
         );
         server.on('error', (err: any) => {

@@ -200,7 +200,9 @@ export const dashboardCache = new Map<string, string>();
  * Updates the pinned status dashboard message for a session.
  */
 export async function syncStatusDashboard(session: SessionInfo, bot: TelegramClient): Promise<void> {
-  if (!session.chatId || !session.statusMessageID) return;
+  if (!session.chatId) return;
+  // Need either an existing dashboard to edit or a thread to create one in
+  if (!session.statusMessageID && !session.threadID) return;
 
   const text = renderStatusDashboard(session);
   const cached = dashboardCache.get(session.sessionID);
@@ -209,28 +211,56 @@ export async function syncStatusDashboard(session: SessionInfo, bot: TelegramCli
     return;
   }
 
-  try {
-    const result = await bot.editMessageText({
-      chat_id: session.chatId,
-      message_id: session.statusMessageID,
-      text,
-      parse_mode: 'Markdown',
-    });
+  // Try to edit existing dashboard
+  if (session.statusMessageID) {
+    try {
+      const result = await bot.editMessageText({
+        chat_id: session.chatId,
+        message_id: session.statusMessageID,
+        text,
+        parse_mode: 'Markdown',
+      });
 
-    if (result.ok) {
-      dashboardCache.set(session.sessionID, text);
-    } else {
+      if (result.ok) {
+        dashboardCache.set(session.sessionID, text);
+        return;
+      }
+
       const desc = result.description || '';
-      // Ignore "message is not modified" error as it means state is already consistent
+      // "message is not modified" means state is already consistent
       if (desc.includes('message is not modified')) {
         dashboardCache.set(session.sessionID, text);
         return;
       }
-      // If message is not found or other API error, don't crash but log it
-      log(`[Daemon] Failed to sync dashboard for ${session.sessionID}: ${result.description}`, 'warn');
+      // Message not found or other error — fall through to recreate
+      log(`[Daemon] Dashboard edit failed for ${session.sessionID}: ${desc}, recreating`, 'warn');
+      session.statusMessageID = undefined;
+    } catch (err) {
+      log(`[Daemon] Dashboard edit error for ${session.sessionID}: ${err}, recreating`, 'warn');
+      session.statusMessageID = undefined;
+    }
+  }
+
+  // Create new dashboard (or recreate after deletion)
+  if (!session.threadID) return;
+  try {
+    const res = await bot.sendMessage({
+      chat_id: session.chatId,
+      message_thread_id: session.threadID,
+      text,
+      parse_mode: 'Markdown',
+    });
+    if (res.ok) {
+      session.statusMessageID = res.result.message_id;
+      dashboardCache.set(session.sessionID, text);
+      await bot.pinChatMessage({
+        chat_id: session.chatId,
+        message_id: session.statusMessageID,
+        disable_notification: true,
+      });
     }
   } catch (err) {
-    log(`[Daemon] Error syncing dashboard for ${session.sessionID}: ${err}`, 'error');
+    log(`[Daemon] Failed to create dashboard for ${session.sessionID}: ${err}`, 'warn');
   }
 }
 

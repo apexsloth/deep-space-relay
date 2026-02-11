@@ -11,63 +11,14 @@ import {
   KB_PER_MB,
 } from '../constants';
 
-// Helper function to check if an error is thread-related
-function isThreadError(err: unknown): boolean {
-  const errStr = String(err).toLowerCase();
-  return errStr.includes('message thread not found') ||
-         errStr.includes('topic_deleted') ||
-         errStr.includes('thread id is invalid') ||
-         errStr.includes('thread not found');
-}
+import { isThreadError } from './reconciler';
 
 export interface MessageHandlerContext {
   state: DaemonState;
   statePath: string;
   bot: TelegramClient;
   chatId: string; // Daemon's global chatId (fallback)
-  ensureThread: (
-    sessionID: string,
-    project: string,
-    title: string,
-    chatId?: string
-  ) => Promise<number | undefined>;
-}
-
-async function recoverStaleThread(
-  err: any,
-  session: SessionInfo,
-  ctx: MessageHandlerContext,
-  sessionID: string
-): Promise<boolean> {
-  if (!session.threadID) return false;
-
-  const isThreadNotFound = isThreadError(err);
-  const chatIdChanged = !!(session.chatId && ctx.chatId && session.chatId !== ctx.chatId);
-
-  // Recover if thread was deleted on Telegram side, OR if the daemon's chatId
-  // changed in config (session still points to the old chat's thread)
-  if (!isThreadNotFound && !chatIdChanged) return false;
-
-  const reason = isThreadNotFound
-    ? 'thread not found'
-    : `chatId changed (${session.chatId} -> ${ctx.chatId})`;
-  log(`[Daemon] Thread ${session.threadID} stale for ${sessionID} (${reason}), recreating`, 'warn');
-
-  // Clear old thread mapping (both composite and legacy keys)
-  ctx.state.threadToSession.delete(`${session.chatId}:${session.threadID}`);
-  ctx.state.threadToSession.delete(String(session.threadID));
-  session.threadID = undefined;
-
-  // Update chatId to current config value if it changed
-  if (chatIdChanged) {
-    log(`[Daemon] Migrating session chatId: ${session.chatId} -> ${ctx.chatId}`, 'info');
-    session.chatId = ctx.chatId;
-  }
-
-  saveState(ctx.state, ctx.statePath);
-  // Create new thread in the (potentially updated) chat
-  await ctx.ensureThread(sessionID, session.project, session.title, session.chatId);
-  return true;
+  reconcile: (sessionID: string) => Promise<number | undefined>;
 }
 
 /**
@@ -87,9 +38,10 @@ async function sendMarkdown(
 }
 
 /**
- * Execute a send with automatic stale-thread recovery.
- * On thread error, recreates the thread and retries with retryFn (which may differ from sendFn,
- * e.g. dropping reply_to_message_id since the original message won't exist in the new thread).
+ * Execute a send with automatic stale-thread recovery via the reconciler.
+ * On thread error, marks the thread unverified, calls reconcile to recreate,
+ * and retries with retryFn (which may differ from sendFn, e.g. dropping
+ * reply_to_message_id since the original message won't exist in the new thread).
  */
 async function sendWithRecovery<T>(
   sendFn: () => Promise<T>,
@@ -99,10 +51,23 @@ async function sendWithRecovery<T>(
   sessionID: string,
 ): Promise<T> {
   try {
-    return await sendFn();
+    const result = await sendFn();
+    // Send succeeded — mark thread as verified
+    if (session.threadVerified !== true) {
+      session.threadVerified = true;
+      saveState(ctx.state, ctx.statePath);
+    }
+    return result;
   } catch (err) {
-    const recovered = await recoverStaleThread(err, session, ctx, sessionID);
-    if (recovered && session.threadID) {
+    if (!isThreadError(err) || !session.threadID) throw err;
+
+    // Thread is stale — mark unverified and reconcile
+    log(`[Daemon] Thread ${session.threadID} stale for ${sessionID}, reconciling`, 'warn');
+    session.threadVerified = false;
+    saveState(ctx.state, ctx.statePath);
+
+    const newThreadID = await ctx.reconcile(sessionID);
+    if (newThreadID) {
       return await retryFn();
     }
     throw err;
@@ -200,6 +165,12 @@ export async function handleRegister(
       'info'
     );
     
+    // Eager thread creation for main agents — ensures broadcast routing works immediately
+    // Subagents remain lazy (thread created on first send)
+    if (!isSubagent && !session.threadID && session.chatId) {
+      await ctx.reconcile(sid);
+    }
+
     // Sync dashboard on registration (catches up if any meta was missed)
     if (session.threadID && session.chatId) {
       syncStatusDashboard(session, bot).catch((err) =>
@@ -357,7 +328,7 @@ export async function handleSend(
   ctx: MessageHandlerContext,
   currentSessionID: string | null
 ) {
-  const { state, statePath, bot, ensureThread } = ctx;
+  const { state, statePath, bot } = ctx;
   const sessionID = msg.sessionID || currentSessionID;
   const correlationId = msg.correlationId;
   if (!sessionID) return;
@@ -368,7 +339,7 @@ export async function handleSend(
   }
 
   if (!session.threadID) {
-    await ensureThread(sessionID, session.project, session.title, session.chatId);
+    await ctx.reconcile(sessionID);
   }
 
   const text = msg.text;
@@ -455,14 +426,14 @@ export async function handleReplyTo(
   ctx: MessageHandlerContext,
   currentSessionID: string | null
 ) {
-  const { state, statePath, bot, ensureThread } = ctx;
+  const { state, statePath, bot } = ctx;
   const sessionID = msg.sessionID || currentSessionID;
   const correlationId = msg.correlationId;
   const session = state.sessions.get(sessionID);
   if (!session || !session.chatId) return;
 
   if (!session.threadID) {
-    await ensureThread(sessionID, session.project, session.title, session.chatId);
+    await ctx.reconcile(sessionID);
   }
 
   try {
@@ -505,14 +476,14 @@ export async function handleAsk(
   ctx: MessageHandlerContext,
   currentSessionID: string | null
 ) {
-  const { state, statePath, bot, ensureThread } = ctx;
+  const { state, statePath, bot } = ctx;
   const sessionID = msg.sessionID || currentSessionID;
   const correlationId = msg.correlationId;
   const session = state.sessions.get(sessionID);
   if (!session || !session.chatId) return;
 
   if (!session.threadID) {
-    await ensureThread(sessionID, session.project, session.title, session.chatId);
+    await ctx.reconcile(sessionID);
   }
 
   const askID = msg.askID;
@@ -698,13 +669,13 @@ export async function handlePermissionRequest(
   ctx: MessageHandlerContext,
   currentSessionID: string | null
 ) {
-  const { state, statePath, bot, ensureThread } = ctx;
+  const { state, statePath, bot } = ctx;
   const sid = currentSessionID || msg.sessionID;
   if (!sid) return;
   const session = state.sessions.get(sid);
   if (!session || !session.chatId) return;
 
-  if (!session.threadID) await ensureThread(sid, session.project, session.title, session.chatId);
+  if (!session.threadID) await ctx.reconcile(sid);
 
   const permText = `🔒 **Permission Request**\n\n**Tool:** \`${msg.tool}\`\n**Description:** ${msg.description}`;
   const permMarkup = {
@@ -766,7 +737,7 @@ export async function handleSetChat(
   ctx: MessageHandlerContext,
   currentSessionID: string | null
 ) {
-  const { state, statePath, ensureThread } = ctx;
+  const { state, statePath } = ctx;
   const sessionID = msg.sessionID || currentSessionID;
   const correlationId = msg.correlationId;
   const newChatId = msg.chatId;
@@ -799,17 +770,19 @@ export async function handleSetChat(
     state.threadToSession.delete(String(session.threadID));
   }
 
-  // Update session chatId and clear threadID so a new one is created
+  // Update session chatId and clear threadID so reconciler creates a new one
   const oldChatId = session.chatId;
   session.chatId = newChatId;
   session.threadID = undefined;
+  session.threadVerified = undefined;
+  session.statusMessageID = undefined;
   saveState(state, statePath);
 
   log(`[Daemon] Switching session ${sessionID} from chat ${oldChatId} to ${newChatId}`, 'info');
 
-  // Create a new thread in the target chat
+  // Create a new thread in the target chat via reconciler
   try {
-    const threadID = await ensureThread(sessionID, session.project, session.title, newChatId);
+    const threadID = await ctx.reconcile(sessionID);
     socket.write(
       JSON.stringify({
         type: 'set_chat_ack',

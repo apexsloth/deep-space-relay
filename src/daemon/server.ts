@@ -1,6 +1,6 @@
 import { createServer } from 'node:net';
 import type { TelegramClient } from '../telegram';
-import { saveState, sendToClient, type DaemonState } from './state';
+import { saveState, type DaemonState } from './state';
 import {
   handleRegister,
   handleDeregister,
@@ -25,7 +25,6 @@ import { MAX_BUFFER_SIZE, AUTH_CHECK_INTERVAL_MS } from '../constants';
 
 // Track daemon start time for uptime calculation
 const daemonStartTime = Date.now();
-import { formatThreadTitle, renderStatusDashboard } from './utils';
 import { log } from './logger';
 
 export function createSocketServer(
@@ -34,12 +33,7 @@ export function createSocketServer(
   statePath: string,
   bot: TelegramClient,
   getChatId: () => string,
-  ensureThread: (
-    sessionID: string,
-    project: string,
-    title: string,
-    chatId?: string
-  ) => Promise<number | undefined>,
+  reconcile: (sessionID: string) => Promise<number | undefined>,
   ipcToken?: string
 ) {
   // SECURITY: Require non-empty token for authentication
@@ -128,14 +122,7 @@ export function createSocketServer(
             statePath,
             bot,
             chatId,
-            ensureThread: (sid: string, proj: string, title: string, sessionChatId?: string) => {
-              const effectiveId = sessionChatId || chatId;
-              log(
-                `[Daemon] ensureThread wrapper: sessionChatId=${sessionChatId} globalChatId=${chatId} effective=${effectiveId}`,
-                'debug'
-              );
-              return ensureThread(sid, proj, title, effectiveId);
-            },
+            reconcile: (sessionID: string) => reconcile(sessionID),
           };
 
           switch (msg.type) {
@@ -263,116 +250,4 @@ export function createSocketServer(
   });
 
   return server;
-}
-
-// Track in-flight thread creation promises to prevent duplicates
-const threadCreationLocks = new Map<string, Promise<number | undefined>>();
-
-export async function ensureThread(
-  sessionID: string,
-  project: string,
-  title: string,
-  state: DaemonState,
-  statePath: string,
-  bot: TelegramClient,
-  chatId: string
-): Promise<number | undefined> {
-  if (!chatId) return undefined;
-
-  let session = state.sessions.get(sessionID);
-  if (session?.threadID) {
-    log(`[Daemon] Thread already exists for ${sessionID}`, 'debug');
-    return session.threadID;
-  }
-
-  // Check if thread creation is already in progress for this session
-  const existingLock = threadCreationLocks.get(sessionID);
-  if (existingLock) {
-    log(`[Daemon] Thread creation already in progress for ${sessionID}, waiting...`, 'debug');
-    return existingLock;
-  }
-
-  // Create a new thread creation promise and store it in the lock map
-  const creationPromise = (async () => {
-    try {
-      // Double-check threadID after acquiring lock (another request might have created it)
-      session = state.sessions.get(sessionID);
-      if (session?.threadID) {
-        log(`[Daemon] Thread was created while waiting for lock: ${sessionID}`, 'debug');
-        return session.threadID;
-      }
-
-      const agentName = session?.agentName;
-      const isSubagent = !!session?.parentID;
-      const threadName = formatThreadTitle(agentName, project, title, isSubagent);
-
-      log(
-        `[Daemon] Creating thread for ${sessionID} title: ${threadName} chatId: ${chatId}`,
-        'info'
-      );
-      const result = await bot.createForumTopic({ chat_id: chatId, name: threadName });
-      if (!result.ok) {
-        log(`[Daemon] createForumTopic failed: ${JSON.stringify(result)}`, 'error');
-        return undefined;
-      }
-      const topic = result.result;
-      log(`[Daemon] Thread created: ${topic.message_thread_id}`, 'info');
-
-      const threadID = topic.message_thread_id;
-      if (!session) {
-        session = {
-          sessionID,
-          project,
-          title,
-          threadID,
-          chatId,
-          pendingPermissions: new Map(),
-          pendingAsks: new Map(),
-          messageQueue: [],
-          messageIDs: [],
-        };
-        state.sessions.set(sessionID, session);
-      } else {
-        session.threadID = threadID;
-        session.chatId = chatId;
-      }
-
-      state.threadToSession.set(`${chatId}:${threadID}`, sessionID);
-      
-      // Create and pin session dashboard
-      const dashboardText = renderStatusDashboard(session);
-      const dashboardRes = await bot.sendMessage({
-        chat_id: chatId,
-        message_thread_id: threadID,
-        text: dashboardText,
-        parse_mode: 'Markdown',
-      });
-      if (dashboardRes.ok) {
-        session.statusMessageID = dashboardRes.result.message_id;
-        await bot.pinChatMessage({
-          chat_id: chatId,
-          message_id: session.statusMessageID,
-          disable_notification: true,
-        });
-      }
-
-      saveState(state, statePath);
-
-      // Notify client that thread is created
-      sendToClient(state.clients, sessionID, { type: 'thread_created', threadID });
-
-      return threadID;
-    } catch (err) {
-      log(`[Daemon] Failed to create thread: ${err}`, 'error');
-      return undefined;
-    } finally {
-      // Always remove the lock when done (success or failure)
-      threadCreationLocks.delete(sessionID);
-    }
-  })();
-
-  // Store the promise in the lock map before starting
-  threadCreationLocks.set(sessionID, creationPromise);
-
-  return creationPromise;
 }

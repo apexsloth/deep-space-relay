@@ -5,7 +5,8 @@ export {
   cleanupOldSessions,
   type DaemonState,
 } from './state';
-export { createSocketServer, ensureThread } from './server';
+export { createSocketServer } from './server';
+export { reconcile } from './reconciler';
 export {
   configureBot,
   createMessageHandler,
