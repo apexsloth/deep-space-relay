@@ -22,6 +22,7 @@ export async function configureBot(bot: TelegramClient, chatId: string) {
     { command: 'help', description: 'Show help and workflow ideas' },
     { command: 'all', description: 'Send a message to ALL connected agents' },
     { command: 'stop', description: 'Stop the current session' },
+    { command: 'clear', description: 'Delete messages except last N (default 10): /clear [N]' },
   ];
 
   const checkResult = (name: string, result: any) => {
@@ -238,6 +239,78 @@ export function createMessageHandler(
       } catch (err) {
         log(`[Daemon] Failed to delete forum topic: ${err}`, 'error');
       }
+      return;
+    }
+
+    if (text.startsWith('/clear')) {
+      if (!threadId) {
+        await bot.sendMessage({
+          chat_id: chatId,
+          text: `Please use /clear inside an agent's thread. Usage: /clear [N]`,
+        });
+        return;
+      }
+      const sid =
+        state.threadToSession.get(`${msgChatId}:${threadId}`) ||
+        state.threadToSession.get(String(threadId));
+      const session = sid ? state.sessions.get(sid) : null;
+      if (!session) {
+        await bot.sendMessage({
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text: 'Session info not found for this thread.',
+        });
+        return;
+      }
+
+      const args = text.split(' ');
+      const limit = args[1] ? parseInt(args[1], 10) : 10;
+      if (isNaN(limit) || limit < 0) {
+        await bot.sendMessage({
+          chat_id: chatId,
+          message_thread_id: threadId,
+          text: 'Invalid limit. Usage: `/clear [N]`',
+          parse_mode: 'Markdown',
+        });
+        return;
+      }
+
+      const idsToDelete = session.messageIDs.slice(0, -limit).filter(id => id !== session.statusMessageID);
+      let deletedCount = 0;
+      
+      // Attempt to delete messages
+      for (const id of idsToDelete) {
+        try {
+          const res = await bot.deleteMessage({ chat_id: msgChatId, message_id: id });
+          if (res.ok) {
+            deletedCount++;
+          }
+        } catch (err) {
+          log(`[Commands] Failed to delete message ${id}: ${err}`, 'debug');
+        }
+      }
+
+      // Update session message IDs
+      session.messageIDs = session.messageIDs.filter(id => !idsToDelete.includes(id) || idsToDelete.indexOf(id) >= idsToDelete.length - limit);
+      // More accurate: just keep the ones we didn't try to delete or that failed?
+      // Actually, just keep the last 'limit' ones and the ones that failed if we really want accuracy.
+      // But keeping it simple:
+      session.messageIDs = session.messageIDs.filter(id => !idsToDelete.includes(id));
+      
+      saveState(state, statePath);
+
+      // Delete the /clear command itself
+      try {
+        await bot.deleteMessage({ chat_id: msgChatId, message_id: message.message_id });
+      } catch (err) {
+        // Ignore
+      }
+
+      await bot.sendMessage({
+        chat_id: chatId,
+        message_thread_id: threadId,
+        text: `🧹 Cleared ${deletedCount} messages (keeping last ${limit}).`,
+      });
       return;
     }
 
