@@ -90,6 +90,7 @@ export interface SessionInfo {
   pendingAsks: Map<string, string[]>; // askID -> options
   messageQueue: string[];
   lastMessageID?: number;
+  statusMessageID?: number;
   messageIDs: number[]; // Track all message IDs
 }
 

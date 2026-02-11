@@ -229,6 +229,12 @@ export class TelegramClient extends EventEmitter {
   async setMyCommands(params: any) {
     return this.callApi('setMyCommands', params);
   }
+  async pinChatMessage(params: any) {
+    return this.callApi('pinChatMessage', params);
+  }
+  async unpinChatMessage(params: any) {
+    return this.callApi('unpinChatMessage', params);
+  }
 
   async getUpdates(params: any): Promise<Update[]> {
     const res = await this.callApi('getUpdates', params);

@@ -1,6 +1,8 @@
 import type { DaemonState } from './state';
 import type { SessionInfo } from '../types';
+import type { TelegramClient } from '../telegram';
 import { MAX_MESSAGE_IDS, RANDOM_SUFFIX_RANGE } from '../constants';
+import { log } from './logger';
 
 /**
  * Curated list of creative names from Final Space and cult classic sci-fi
@@ -167,6 +169,53 @@ export function formatThreadTitle(
 
   const body = skipProject ? cleanTitle : `${project}: ${cleanTitle}`;
   return `${nameTag}${body}`.trim();
+}
+
+/**
+ * Renders a Markdown status dashboard for a session.
+ */
+export function renderStatusDashboard(session: SessionInfo): string {
+  const agent = session.agentName || 'Unknown Agent';
+  const model = session.model || 'Unknown Model';
+  const project = session.project || 'Unknown Project';
+  const status = session.status || 'idle';
+
+  let statusEmoji = '⚪';
+  if (status === 'busy') statusEmoji = '🟡';
+  if (status === 'idle') statusEmoji = '🟢';
+  if (status === 'disconnected') statusEmoji = '🔴';
+
+  return [
+    `🤖 **Agent:** ${agent}`,
+    `🛠️ **Model:** \`${model}\``,
+    `📊 **Status:** ${statusEmoji} ${status.toUpperCase()}`,
+    `📁 **Project:** \`${project}\``,
+  ].join('\n');
+}
+
+/**
+ * Updates the pinned status dashboard message for a session.
+ */
+export async function syncStatusDashboard(session: SessionInfo, bot: TelegramClient): Promise<void> {
+  if (!session.chatId || !session.statusMessageID) return;
+
+  const text = renderStatusDashboard(session);
+
+  try {
+    const result = await bot.editMessageText({
+      chat_id: session.chatId,
+      message_id: session.statusMessageID,
+      text,
+      parse_mode: 'Markdown',
+    });
+
+    if (!result.ok) {
+      // If message is not found or other API error, don't crash but log it
+      log(`[Daemon] Failed to sync dashboard for ${session.sessionID}: ${result.description}`, 'warn');
+    }
+  } catch (err) {
+    log(`[Daemon] Error syncing dashboard for ${session.sessionID}: ${err}`, 'error');
+  }
 }
 
 /**

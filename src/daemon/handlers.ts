@@ -2,7 +2,7 @@ import { log } from './logger';
 import type { TelegramClient } from '../telegram';
 import type { SessionInfo } from '../types';
 import { saveState, sendToClient, type DaemonState } from './state';
-import { AGENT_NAMES, getRandomAgentName, getSubagentName, formatThreadTitle, addMessageID } from './utils';
+import { AGENT_NAMES, getRandomAgentName, getSubagentName, formatThreadTitle, addMessageID, syncStatusDashboard } from './utils';
 import {
   MS_PER_SECOND,
   SECONDS_PER_MINUTE,
@@ -152,6 +152,14 @@ export async function handleRegister(
       `[Daemon] Registered client: ${sid} chatId: ${session.chatId} msg.chatId: ${msg.chatId}`,
       'info'
     );
+    
+    // Sync dashboard on registration (catches up if any meta was missed)
+    if (session.threadID && session.chatId) {
+      syncStatusDashboard(session, bot).catch((err) =>
+        log(`[Daemon] Failed to sync dashboard on register: ${err}`, 'error')
+      );
+    }
+
     sendToClient(state.clients, sid, {
       type: 'registered',
       success: !!session.chatId,
@@ -214,6 +222,9 @@ export async function handleSetStatus(
     if (session) {
       session.status = msg.status;
       saveState(state, statePath);
+      syncStatusDashboard(session, ctx.bot).catch((err) =>
+        log(`[Daemon] Failed to sync dashboard on status update: ${err}`, 'error')
+      );
     }
   }
 }
@@ -238,11 +249,15 @@ export function handleUpdateMeta(
     session.agentType = msg.agentType;
     changed = true;
   }
-  if (changed) {
-    saveState(state, statePath);
-    log(`[Daemon] Updated meta for ${sessionID}: model=${session.model}, agentType=${session.agentType}`, 'info');
-  }
+    if (changed) {
+      saveState(state, statePath);
+      log(`[Daemon] Updated meta for ${sessionID}: model=${session.model}, agentType=${session.agentType}`, 'info');
+      syncStatusDashboard(session, ctx.bot).catch((err) =>
+        log(`[Daemon] Failed to sync dashboard on meta update: ${err}`, 'error')
+      );
+    }
 }
+
 
 export async function handleTyping(
   msg: any,
@@ -711,8 +726,11 @@ export async function handleSetAgentName(
 
       session.agentName = newName;
       saveState(state, statePath);
-      // Update thread title with new agent name
+      // Update thread title and dashboard with new agent name
       if (session.threadID && session.chatId) {
+        syncStatusDashboard(session, bot).catch((err) =>
+          log(`[Daemon] Failed to sync dashboard on agent name change: ${err}`, 'error')
+        );
         try {
           await bot.editForumTopic({
             chat_id: session.chatId,

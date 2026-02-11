@@ -25,7 +25,7 @@ import { MAX_BUFFER_SIZE, AUTH_CHECK_INTERVAL_MS } from '../constants';
 
 // Track daemon start time for uptime calculation
 const daemonStartTime = Date.now();
-import { formatThreadTitle } from './utils';
+import { formatThreadTitle, renderStatusDashboard } from './utils';
 import { log } from './logger';
 
 export function createSocketServer(
@@ -332,6 +332,24 @@ export async function ensureThread(
       }
 
       state.threadToSession.set(`${chatId}:${threadID}`, sessionID);
+      
+      // Create and pin session dashboard
+      const dashboardText = renderStatusDashboard(session);
+      const dashboardRes = await bot.sendMessage({
+        chat_id: chatId,
+        message_thread_id: threadID,
+        text: dashboardText,
+        parse_mode: 'Markdown',
+      });
+      if (dashboardRes.ok) {
+        session.statusMessageID = dashboardRes.result.message_id;
+        await bot.pinChatMessage({
+          chat_id: chatId,
+          message_id: session.statusMessageID,
+          disable_notification: true,
+        });
+      }
+
       saveState(state, statePath);
 
       // Notify client that thread is created
