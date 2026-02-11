@@ -222,9 +222,6 @@ export async function handleSetStatus(
     if (session) {
       session.status = msg.status;
       saveState(state, statePath);
-      syncStatusDashboard(session, ctx.bot).catch((err) =>
-        log(`[Daemon] Failed to sync dashboard on status update: ${err}`, 'error')
-      );
     }
   }
 }

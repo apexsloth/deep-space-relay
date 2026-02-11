@@ -190,7 +190,6 @@ export function renderStatusDashboard(session: SessionInfo): string {
     `🤖 **Agent:** \`${persona}\``,
     `👤 **Identity:** ${identity}`,
     `🛠️ **Model:** \`${model}\``,
-    `📊 **Status:** ${statusEmoji} ${status.toUpperCase()}`,
     `📁 **Project:** \`${project}\``,
   ].join('\n');
 }
