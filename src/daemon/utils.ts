@@ -194,6 +194,8 @@ export function renderStatusDashboard(session: SessionInfo): string {
   ].join('\n');
 }
 
+export const dashboardCache = new Map<string, string>();
+
 /**
  * Updates the pinned status dashboard message for a session.
  */
@@ -201,6 +203,11 @@ export async function syncStatusDashboard(session: SessionInfo, bot: TelegramCli
   if (!session.chatId || !session.statusMessageID) return;
 
   const text = renderStatusDashboard(session);
+  const cached = dashboardCache.get(session.sessionID);
+
+  if (cached === text) {
+    return;
+  }
 
   try {
     const result = await bot.editMessageText({
@@ -210,7 +217,15 @@ export async function syncStatusDashboard(session: SessionInfo, bot: TelegramCli
       parse_mode: 'Markdown',
     });
 
-    if (!result.ok) {
+    if (result.ok) {
+      dashboardCache.set(session.sessionID, text);
+    } else {
+      const desc = result.description || '';
+      // Ignore "message is not modified" error as it means state is already consistent
+      if (desc.includes('message is not modified')) {
+        dashboardCache.set(session.sessionID, text);
+        return;
+      }
       // If message is not found or other API error, don't crash but log it
       log(`[Daemon] Failed to sync dashboard for ${session.sessionID}: ${result.description}`, 'warn');
     }
