@@ -314,18 +314,8 @@ export function createMessageHandler(
       session.messageIDs = session.messageIDs.filter(id => !idsToDelete.includes(id));
       
       saveState(state, statePath);
-
-      const statusMsg = await bot.sendMessage({
-        chat_id: chatId,
-        message_thread_id: threadId,
-        text: `🧹 Cleared ${deletedCount} messages (keeping last ${limit}).`,
-      });
-
-      if (statusMsg.ok) {
-        addMessageID(session, statusMsg.result.message_id);
-        saveState(state, statePath);
-      }
       return;
+
     }
 
     if (text === '/help') {
