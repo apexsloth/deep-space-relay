@@ -18,7 +18,7 @@ Message your OpenCode agents directly via Telegram. Each project can have its ow
 Install the package into your OpenCode cache directory so it can be loaded:
 
 ```bash
-npm install --prefix ~/.cache/opencode deep-space-relay
+npm install --prefix ~/.config/opencode deep-space-relay
 ```
 
 ### 2. Setup & Configure
