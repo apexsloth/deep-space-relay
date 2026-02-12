@@ -665,18 +665,20 @@ export function createMessageHandler(
             }
           }
 
-          if (
-            !sendToClient(state.clients, sid, {
-              type: 'message',
-              text,
-              isThread: true,
-              messageID: message.message_id,
-            })
-          ) {
+          const sent = sendToClient(state.clients, sid, {
+            type: 'message',
+            text,
+            isThread: true,
+            messageID: message.message_id,
+          });
+          if (!sent) {
+            log(`[Daemon] Client ${sid} not connected, queueing message`, 'warn');
             session.messageQueue.push(text);
           }
           saveState(state, statePath);
         }
+      } else {
+        log(`[Daemon] No session found for thread ${threadId} in chat ${msgChatId}`, 'warn');
       }
     }
     } catch (err) {
