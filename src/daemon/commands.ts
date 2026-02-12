@@ -564,19 +564,24 @@ export function createMessageHandler(
       // Broadcast only to active main agents (with threads, no subagents) in this chat.
       // Subagents don't receive General topic chatter.
       // Use /all to reach every connected agent including subagents.
+      let broadcastCount = 0;
       for (const sid of state.clients.keys()) {
         const session = state.sessions.get(sid);
         if (
           String(session?.chatId) === String(msgChatId) &&
           !session?.parentID
         ) {
-          sendToClient(state.clients, sid, {
+          const sent = sendToClient(state.clients, sid, {
             type: 'message',
             text,
             isThread: false,
             messageID: message.message_id,
           });
+          if (sent) broadcastCount++;
         }
+      }
+      if (broadcastCount === 0) {
+        log(`[Daemon] No connected clients to broadcast message in chat ${msgChatId}`, 'warn');
       }
     } else {
       const sid =
