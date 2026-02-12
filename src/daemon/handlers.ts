@@ -321,9 +321,14 @@ export async function handleTyping(
   }
 }
 
-export async function handleReact(msg: any, ctx: MessageHandlerContext) {
+export async function handleReact(
+  msg: any,
+  ctx: MessageHandlerContext,
+  currentSessionID: string | null
+) {
   const { state, bot } = ctx;
-  const sessionID = msg.sessionID;
+  const sessionID = msg.sessionID || currentSessionID;
+  if (!sessionID) return;
   const session = state.sessions.get(sessionID);
   if (!session || !session.threadID || !session.chatId) return;
 

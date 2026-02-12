@@ -393,6 +393,7 @@ describe('Deep Space Relay Integration Tests', () => {
       const title = 'Typing Test';
 
       await relay.register(sessionId, title);
+      await sleep(100); // Let thread creation complete
 
       // With eager thread creation, typing indicator works immediately
       await relay.sendTyping();
@@ -795,11 +796,12 @@ describe('Deep Space Relay Integration Tests', () => {
       expect(topicCalls.length).toBe(1);
 
       // Set agent name
-      const result = await relay.setAgentName('WALL-E');
+      const uniqueName = `EVE-${Math.random().toString(36).substring(7)}`;
+      const result = await relay.setAgentName(uniqueName);
       expect(result.success).toBe(true);
 
       // Give time for the update
-      await sleep(200);
+      await sleep(400);
 
       // Verify editForumTopic was called to update the title
       const editCalls = findCalls(mockTelegram.calls, 'editForumTopic');
@@ -807,7 +809,7 @@ describe('Deep Space Relay Integration Tests', () => {
 
       // The new title should include the agent name
       const lastEditCall = editCalls[editCalls.length - 1];
-      expect(lastEditCall.params.name as string).toContain('WALL-E');
+      expect(lastEditCall.params.name as string).toContain(uniqueName);
     });
 
     it('should acknowledge agent name set', async () => {
@@ -876,7 +878,7 @@ describe('Deep Space Relay Integration Tests', () => {
       const relay2 = createTestRelay(daemon.socketPath);
       await relay2.register(sessionId, 'Brand New Title');
 
-      await sleep(50);
+      await sleep(300);
 
       // Verify editForumTopic was called with the new title
       const editCalls = findCalls(mockTelegram.calls, 'editForumTopic');
@@ -1298,7 +1300,7 @@ describe('Deep Space Relay Integration Tests', () => {
       await relayWithChat.send('Message to react to');
       await relayWithChat.react('👍');
 
-      await sleep(50);
+      await sleep(300);
 
       // Verify setMessageReaction was called with the session's chatId
       const reactionCalls = findCalls(mockTelegram.calls, 'setMessageReaction');
@@ -1324,7 +1326,7 @@ describe('Deep Space Relay Integration Tests', () => {
       // Start permission request
       relayWithChat.askPermission('perm-chat-001', 'test_tool', 'Test description');
 
-      await sleep(50);
+      await sleep(300);
 
       // Verify sendMessage with permission request was sent to correct chat
       const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
@@ -1354,7 +1356,7 @@ describe('Deep Space Relay Integration Tests', () => {
       // Start ask
       relayWithChat.ask('Which option?', ['A', 'B']);
 
-      await sleep(50);
+      await sleep(300);
 
       // Verify ask was sent to correct chat
       const messageCalls = findCalls(mockTelegram.calls, 'sendMessage');
@@ -1402,9 +1404,9 @@ describe('Deep Space Relay Integration Tests', () => {
 
       await relayWithChat.register(sessionId, title);
       await relayWithChat.send('Create thread');
-      await relayWithChat.setAgentName('TestBot');
+      await relayWithChat.setAgentName('TestBot-Title');
 
-      await sleep(50);
+      await sleep(300);
 
       // Verify editForumTopic was called with correct chat
       const editCalls = findCalls(mockTelegram.calls, 'editForumTopic');

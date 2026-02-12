@@ -259,7 +259,7 @@ export function createRelay(config: RelayConfig) {
         resolve(response);
       });
 
-      const msgWithDebug = { ...msg, _debug: debugLocation, correlationId };
+      const msgWithDebug = { ...msg, _debug: debugLocation, correlationId, sessionID };
       sock.write(JSON.stringify(msgWithDebug) + '\n');
 
       timeout = setTimeout(() => {
