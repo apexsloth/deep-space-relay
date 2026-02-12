@@ -18,14 +18,14 @@ Message your OpenCode agents directly via Telegram. Each project can have its ow
 Install the package into your OpenCode cache directory so it can be loaded:
 
 ```bash
-npm install --prefix ~/.config/opencode deep-space-relay
+npm install --prefix ~/.config/opencode deep-space-relay@latest
 ```
 
 ### 2. Setup & Configure
 Run the interactive setup to configure your Telegram bot token and chat ID:
 
 ```bash
-npx deep-space-relay setup
+npx deep-space-relay@latest setup
 ```
 
 ### 3. Start the Daemon

@@ -342,8 +342,8 @@ export async function handleReact(
       reaction: [{ type: 'emoji', emoji: msg.emoji }],
     });
   } catch (err) {
-    // Reactions are non-critical, log at debug level
-    log(`[Daemon] Failed to set reaction: ${err}`, 'debug');
+    // Log at warn level to diagnose custom emoji issues
+    log(`[Daemon] Failed to set reaction: ${err}`, 'warn', { emoji: msg.emoji, messageID: targetMessageID });
   }
 }
 
