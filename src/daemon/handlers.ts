@@ -34,6 +34,26 @@ async function sendMarkdown(
     result = await bot.sendMessage(params);
   }
   if (!result.ok) throw new Error(result.description);
+
+  // Detect silent redirect: Telegram accepts sends to deleted threads
+  // without error, silently dropping the message into General instead.
+  // Compare response thread ID with what we requested to catch this.
+  if (params.message_thread_id && result.ok && result.result) {
+    const sentThreadId = result.result.message_thread_id;
+    if (sentThreadId !== params.message_thread_id) {
+      // Try to delete the misplaced message from General
+      try {
+        await bot.deleteMessage({
+          chat_id: params.chat_id,
+          message_id: result.result.message_id,
+        });
+      } catch (_) { /* best-effort cleanup */ }
+      throw new Error(
+        `message thread not found: thread ${params.message_thread_id} is deleted (message landed in General as thread ${sentThreadId ?? 'none'})`
+      );
+    }
+  }
+
   return result;
 }
 
@@ -77,6 +97,11 @@ export async function handleRegister(
   const { state, statePath, bot, chatId } = ctx;
   const sid = msg.sessionID;
   const correlationId = msg.correlationId;
+  if (sid && !sid.startsWith('ses_')) {
+    log(`[Daemon] Rejected register: invalid sessionID ${sid} (must start with ses_)`, 'warn');
+    sendToClient(state.clients, sid, { type: 'error', error: 'Invalid sessionID: must start with ses_', correlationId });
+    return currentSessionID;
+  }
   if (sid) {
     state.clients.set(sid, socket);
     // Use project/title/chatId from message, fallback to existing session values or defaults

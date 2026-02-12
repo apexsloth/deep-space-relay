@@ -29,8 +29,8 @@ export function createState(statePath: string): DaemonState {
         : Object.entries(data.sessions);
       let skipped = 0;
       for (const [id, info] of entries) {
-        // Skip sessions without threads — they're ephemeral and will re-register
-        if (!info.threadID) {
+        // Skip invalid or threadless sessions — they're ephemeral and will re-register
+        if (!info.threadID || !id.startsWith('ses_')) {
           skipped++;
           continue;
         }
@@ -71,7 +71,7 @@ export function saveState(state: DaemonState, statePath: string) {
   // threadToSession is rebuilt from sessions on load, no need to persist
   const sessions: Record<string, any> = {};
   for (const [id, session] of state.sessions) {
-    if (session.threadID) {
+    if (session.threadID && id.startsWith('ses_')) {
       sessions[id] = session;
     }
   }

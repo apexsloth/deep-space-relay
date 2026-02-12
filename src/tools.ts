@@ -15,7 +15,9 @@ export function createTools(
   directory: string
 ) {
   return {
-    // Debug tool: manually register session with daemon (normally done automatically via hooks)
+    // Debug tool: manually register session with daemon
+    // DISABLED — using fake session IDs crashes OpenCode (message injection fails for non-ses_ IDs)
+    // To test registration, use the normal auto-registration flow via session.created events
     dsr_debug_register: tool({
       description:
         'Debug tool to manually register this session with the Deep Space Relay daemon. Creates or reuses a Telegram thread. Normally automatic via hooks.',
@@ -23,13 +25,8 @@ export function createTools(
         sessionID: tool.schema.string(),
         title: tool.schema.string(),
       },
-      async execute(args, ctx) {
-        const sessionId = args.sessionID || (ctx as any)?.sessionID;
-        const r = getRelay(sessionId);
-        const result = await r.register(args.sessionID, args.title, ctx.abort);
-        return result.success
-          ? 'Registered with Deep Space Relay.'
-          : `Failed to register: ${result.error}`;
+      async execute(_args, _ctx) {
+        return 'dsr_debug_register is disabled. Registration happens automatically via session.created events.';
       },
     }),
 
