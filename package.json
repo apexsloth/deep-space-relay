@@ -1,6 +1,6 @@
 {
   "name": "deep-space-relay",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "OpenCode Telegram notification plugin - send notifications on session events and expose a notify tool",
   "author": {
     "name": "apexsloth"
