@@ -1,16 +1,16 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+This project uses **tk** (ticket) for issue tracking. Run `tk help` to get started.
 
 ## Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
-bd push               # Push changes (custom script)
+tk ready              # Find unblocked work
+tk show <id>          # View ticket details
+tk start <id>         # Mark in progress
+tk close <id>         # Close completed ticket
+tk create "Title"     # Create a new ticket
+tk list               # List tickets
 ```
 
 ## Logging Policy (CRITICAL)
@@ -35,7 +35,6 @@ This ensures logs are captured by the OpenCode plugin system and visible in the 
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
