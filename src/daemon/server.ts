@@ -243,6 +243,7 @@ export function createSocketServer(
         const session = state.sessions.get(currentSessionID);
         if (session) {
           session.status = 'disconnected';
+          session.disconnectedAt = Date.now();
           saveState(state, statePath);
         }
       }

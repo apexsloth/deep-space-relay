@@ -28,6 +28,7 @@ export interface TestContext {
 }
 
 let testCounter = 0;
+const DEBUG_TEST_DAEMON_IO = process.env.DSR_TEST_DEBUG_IO === '1';
 
 /**
  * Create an isolated test directory with unique paths
@@ -93,13 +94,15 @@ export async function spawnTestDaemon(
   let output = '';
   daemonProcess.stdout?.on('data', (data) => {
     output += data.toString();
-    // Uncomment for debugging:
-    console.log('[Daemon stdout]', data.toString());
+    if (DEBUG_TEST_DAEMON_IO) {
+      console.log('[Daemon stdout]', data.toString());
+    }
   });
   daemonProcess.stderr?.on('data', (data) => {
     output += data.toString();
-    // Uncomment for debugging:
-    console.error('[Daemon stderr]', data.toString());
+    if (DEBUG_TEST_DAEMON_IO) {
+      console.error('[Daemon stderr]', data.toString());
+    }
   });
 
   const daemon: TestDaemon = {

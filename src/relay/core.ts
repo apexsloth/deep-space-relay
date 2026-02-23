@@ -709,15 +709,16 @@ export function createRelay(config: RelayConfig) {
     // Fetch config from daemon (chatId, etc.)
     async getConfig(): Promise<{ chatId: string | null }> {
       const s = await ensureSocket();
+      const correlationId = generateCorrelationId();
       return new Promise((resolve) => {
-        pendingResolves.set('get_config', (response) => {
+        pendingResolves.set(correlationId, (response) => {
           chatId = response.chatId || null;
           resolve({ chatId });
         });
-        s.write(JSON.stringify({ type: 'get_config' }) + '\n');
+        s.write(JSON.stringify({ type: 'get_config', correlationId }) + '\n');
         setTimeout(() => {
-          if (pendingResolves.has('get_config')) {
-            pendingResolves.delete('get_config');
+          if (pendingResolves.has(correlationId)) {
+            pendingResolves.delete(correlationId);
             resolve({ chatId: null });
           }
         }, CONFIG_FETCH_TIMEOUT_MS);

@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'bun:test';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   createMockTelegramServer,
   findCalls,
@@ -70,7 +71,7 @@ describe('Deep Space Relay Integration Tests', () => {
     mockTelegram.reset();
 
     // Give the daemon a moment to finish any lingering operations from the previous test
-    await sleep(50);
+    await sleep(10);
 
     // Create relay client
     relay = createTestRelay(daemon.socketPath);
@@ -110,6 +111,17 @@ describe('Deep Space Relay Integration Tests', () => {
       expect(commandMap.get('stop')).toContain('Stop');
       expect(commandMap.get('cleanup')).toContain('Delete');
       expect(commandMap.get('list')).toContain('List');
+    });
+  });
+
+  describe('Relay Config Fetch', () => {
+    it('should return daemon chatId via getConfig without timing out', async () => {
+      const startedAt = Date.now();
+      const result = await relay.getConfig();
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result.chatId).toBe(TEST_CHAT_ID);
+      expect(elapsedMs).toBeLessThan(1000);
     });
   });
 
@@ -445,6 +457,16 @@ describe('Deep Space Relay Integration Tests', () => {
       // Verify deleteForumTopic was called
       const deleteCalls = findCalls(mockTelegram.calls, 'deleteForumTopic');
       expect(deleteCalls.length).toBe(1);
+    });
+
+    it('should return a not found error when deleting a missing session', async () => {
+      const startedAt = Date.now();
+      const result = await relay.deleteSession('ses_missing-delete-001');
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Session not found');
+      expect(elapsedMs).toBeLessThan(1000);
     });
   });
 
@@ -957,7 +979,6 @@ describe('Deep Space Relay Integration Tests', () => {
       await sleep(50);
 
       // Read state file
-      const { readFileSync, existsSync } = await import('fs');
       expect(existsSync(daemon.statePath)).toBe(true);
 
       const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
@@ -983,7 +1004,6 @@ describe('Deep Space Relay Integration Tests', () => {
 
       await sleep(50);
 
-      const { readFileSync } = await import('fs');
       const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
 
       // threadToSession is no longer persisted (rebuilt on load from sessions)
@@ -991,6 +1011,27 @@ describe('Deep Space Relay Integration Tests', () => {
       const info = stateData.sessions[sessionId];
       expect(info).toBeDefined();
       expect(info.threadID).toBeDefined();
+    });
+
+    it('should persist disconnectedAt on abrupt socket disconnect', async () => {
+      const sessionId = 'ses_test-disconnect-persist-001';
+      const title = 'Disconnect Persist Test';
+
+      await relay.register(sessionId, title);
+      await relay.send('Create thread before disconnect');
+
+      relay.getState().socket?.destroy();
+
+      await waitFor(() => {
+        if (!existsSync(daemon.statePath)) return false;
+        const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
+        return !!stateData.sessions?.[sessionId]?.disconnectedAt;
+      }, 2000, 'Disconnected session timestamp was not persisted');
+
+      const stateData = JSON.parse(readFileSync(daemon.statePath, 'utf-8'));
+      const info = stateData.sessions[sessionId];
+      expect(info.status).toBe('disconnected');
+      expect(typeof info.disconnectedAt).toBe('number');
     });
   });
 

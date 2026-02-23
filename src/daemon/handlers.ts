@@ -558,7 +558,17 @@ export async function handleDeleteSession(msg: any, socket: any, ctx: MessageHan
   const sid = msg.sessionID;
   const correlationId = msg.correlationId;
   const session = state.sessions.get(sid);
-  if (!session) return;
+  if (!session) {
+    socket.write(
+      JSON.stringify({
+        type: 'session_deleted',
+        success: false,
+        error: 'Session not found',
+        correlationId,
+      }) + '\n'
+    );
+    return;
+  }
 
   if (session.threadID && session.chatId) {
     try {
