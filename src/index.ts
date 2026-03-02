@@ -19,6 +19,22 @@ const extractNameFromPath = (path?: string): string | undefined => {
   return path.split('/').filter(Boolean).pop();
 };
 
+const MAX_INJECTION_RETRIES = 20;
+const BUSY_RETRY_BASE_DELAY_MS = 500;
+
+function isSessionBusyError(error: unknown): boolean {
+  const errorText = String(
+    typeof error === 'string' ? error : JSON.stringify(error)
+  ).toLowerCase();
+
+  return (
+    errorText.includes('busy') ||
+    errorText.includes('already running') ||
+    errorText.includes('in progress') ||
+    errorText.includes('session is running')
+  );
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DeepSpaceRelay = (async (ctx: PluginContext) => {
   const { directory, worktree, project, client } = ctx;
@@ -77,57 +93,153 @@ export const DeepSpaceRelay = (async (ctx: PluginContext) => {
         ipcToken: dsrConfig.token,
         log,
         onMessage: async (text, isThread, messageID) => {
-          // Format message with prefix based on context
-          const prefix = isThread ? '[DSR DM (use dsr_send to reply)]' : '[DSR Broadcast]';
-          const msgIdPart = messageID ? ` [msg_id: ${messageID}]` : '';
-          const formattedText = `${prefix}${msgIdPart}: ${text}`;
-
-          const r = getRelay(sessionId);
-          const state = r.getState();
-
-          // Fetch current session context (model + agent) to maintain continuity
-          let currentModel: { providerID: string; modelID: string } | undefined;
-          let currentAgent: string | undefined;
           try {
-            const result = await client.session.messages({ path: { id: sessionId }, query: { directory } });
-            const messages = result.data || [];
+            // Format message with prefix based on context
+            const prefix = isThread ? '[DSR DM (use dsr_send to reply)]' : '[DSR Broadcast]';
+            const msgIdPart = messageID ? ` [msg_id: ${messageID}]` : '';
+            const formattedText = `${prefix}${msgIdPart}: ${text}`;
 
-            // Get agent from last user message
-            const lastUserMessage = messages.filter((m: any) => m.info?.role === 'user').pop();
-            if (lastUserMessage?.info?.agent) {
-              currentAgent = lastUserMessage.info.agent as string;
-            }
+            for (let attempt = 1; attempt <= MAX_INJECTION_RETRIES; attempt++) {
+              // Fetch current session context (model + agent) to maintain continuity
+              let currentModel: { providerID: string; modelID: string } | undefined;
+              let currentAgent: string | undefined;
+              try {
+                const result = await client.session.messages({
+                  path: { id: sessionId },
+                  query: { directory },
+                });
 
-            // Get model from last assistant message
-            const lastAssistantMessage = messages
-              .filter((m: any) => m.info?.role === 'assistant')
-              .pop();
-            if (lastAssistantMessage?.info?.providerID && lastAssistantMessage?.info?.modelID) {
-              currentModel = {
-                providerID: lastAssistantMessage.info.providerID as string,
-                modelID: lastAssistantMessage.info.modelID as string,
+                if (result.error) {
+                  log('Failed to fetch session messages for context', 'debug', {
+                    sessionID: sessionId,
+                    error: JSON.stringify(result.error),
+                  });
+                } else {
+                  const messages = result.data || [];
+
+                  // Get agent from last user message
+                  const lastUserMessage = messages.filter((m: any) => m.info?.role === 'user').pop();
+                  if (lastUserMessage?.info?.agent) {
+                    currentAgent = lastUserMessage.info.agent as string;
+                  }
+
+                  // Get model from last assistant message
+                  const lastAssistantMessage = messages
+                    .filter((m: any) => m.info?.role === 'assistant')
+                    .pop();
+                  if (lastAssistantMessage?.info?.providerID && lastAssistantMessage?.info?.modelID) {
+                    currentModel = {
+                      providerID: lastAssistantMessage.info.providerID as string,
+                      modelID: lastAssistantMessage.info.modelID as string,
+                    };
+                  }
+                }
+              } catch (err) {
+                log('Failed to fetch session messages for context', 'debug', { error: String(err) });
+              }
+
+              const injectMessage = async (body: {
+                parts: Array<{ type: 'text'; text: string }>;
+                model?: { providerID: string; modelID: string };
+                agent?: string;
+              }) => {
+                try {
+                  const result = await client.session.prompt({
+                    path: { id: sessionId },
+                    body,
+                    query: { directory },
+                  });
+
+                  if (result.error) {
+                    return { success: false as const, error: result.error };
+                  }
+
+                  return { success: true as const };
+                } catch (err) {
+                  return {
+                    success: false as const,
+                    error: { name: 'PromptThrow', data: { message: String(err) } },
+                  };
+                }
               };
-            }
-          } catch (err) {
-            log('Failed to fetch session messages for context', 'debug', { error: String(err) });
-          }
 
-          client.session
-            .prompt({
-              path: { id: sessionId },
-              body: {
+              const bodyWithContext = {
                 parts: [{ type: 'text', text: formattedText }],
                 ...(currentModel && { model: currentModel }),
                 ...(currentAgent && { agent: currentAgent }),
-              },
-              query: { directory },
-            })
-            .catch((err) => {
-              log('Message injection failed', 'warn', {
+              };
+
+              const primary = await injectMessage(bodyWithContext);
+              if (primary.success) {
+                log('Injected Telegram message into session', 'info', {
+                  sessionID: sessionId,
+                  messageID,
+                  isThread,
+                  hadModel: !!currentModel,
+                  hadAgent: !!currentAgent,
+                  attempt,
+                });
+                return;
+              }
+
+              let finalError: unknown = primary.error;
+
+              // Fall back to plain prompt injection if model/agent context was rejected.
+              // Reliability is more important than preserving exact model/agent metadata.
+              const hadContext = !!(currentModel || currentAgent);
+              if (hadContext) {
+                log('Message injection with context failed, retrying without model/agent', 'warn', {
+                  sessionID: sessionId,
+                  error: JSON.stringify(primary.error),
+                  hadModel: !!currentModel,
+                  hadAgent: !!currentAgent,
+                  attempt,
+                });
+                const fallback = await injectMessage({ parts: [{ type: 'text', text: formattedText }] });
+                if (fallback.success) {
+                  log('Message injection fallback succeeded', 'info', {
+                    sessionID: sessionId,
+                    messageID,
+                    isThread,
+                    attempt,
+                  });
+                  return;
+                }
+
+                finalError = fallback.error;
+                log('Message injection fallback failed', 'warn', {
+                  sessionID: sessionId,
+                  error: JSON.stringify(fallback.error),
+                  attempt,
+                });
+              } else {
+                log('Message injection failed', 'warn', {
+                  sessionID: sessionId,
+                  error: JSON.stringify(primary.error),
+                  attempt,
+                });
+              }
+
+              if (attempt >= MAX_INJECTION_RETRIES || !isSessionBusyError(finalError)) {
+                return;
+              }
+
+              const retryDelay = BUSY_RETRY_BASE_DELAY_MS * attempt;
+              log('Session busy during message injection, retrying', 'info', {
                 sessionID: sessionId,
-                error: String(err),
+                messageID,
+                attempt,
+                retryDelay,
               });
+              await new Promise((resolve) => setTimeout(resolve, retryDelay));
+            }
+          } catch (err) {
+            log('Unhandled error while injecting Telegram message', 'warn', {
+              sessionID: sessionId,
+              messageID,
+              error: String(err),
             });
+          }
         },
         onCommand: async (command, messageID) => {
           log('Received command pass-through from Telegram', 'info', { sessionId, command });

@@ -3,6 +3,9 @@ import type { Relay } from './relay/core';
 import type { LogFn, PluginContext } from './types';
 import { writeProjectConfig } from './config';
 
+// Build fingerprint — bump this manually before building to verify the running plugin version
+const BUILD_FINGERPRINT = 'dsr-build-alpha-1';
+
 // ============================================================
 // TOOL DEFINITIONS
 // ============================================================
@@ -130,6 +133,18 @@ export function createTools(
         const r = getRelay(sessionId);
         const result = await r.deleteSession(args.sessionID, ctx.abort);
         return result.success ? `Session ${args.sessionID} deleted.` : `Failed: ${result.error}`;
+      },
+    }),
+
+    // Debug tool: return build fingerprint to verify correct plugin is loaded
+    dsr_debug_version: tool({
+      description:
+        'Debug tool to check the build fingerprint of the running DSR plugin. Use this to verify the loaded plugin matches the latest build.',
+      args: {
+        _placeholder: tool.schema.boolean().describe('Placeholder. Always pass true.'),
+      },
+      async execute() {
+        return `DSR plugin build fingerprint: ${BUILD_FINGERPRINT}`;
       },
     }),
 

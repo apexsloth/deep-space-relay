@@ -94,7 +94,8 @@ export function createRelay(config: RelayConfig) {
       });
 
       newSocket.on('data', (data) => {
-        buffer += data.toString();
+        const rawStr = data.toString();
+        buffer += rawStr;
 
         // SECURITY: Check buffer size limit to prevent memory exhaustion
         if (buffer.length > MAX_BUFFER_SIZE) {
@@ -111,8 +112,29 @@ export function createRelay(config: RelayConfig) {
 
         for (const line of lines) {
           if (!line.trim()) continue;
+          let msg: any;
           try {
-            const msg = JSON.parse(line);
+            msg = JSON.parse(line);
+          } catch (parseErr) {
+            log('Failed to parse JSON from daemon', 'warn', {
+              error: String(parseErr),
+              linePreview: line.slice(0, 200),
+              lineLength: line.length,
+            });
+            continue;
+          }
+
+          try {
+            // Log incoming messages from daemon (skip high-frequency ones)
+            const isHighFreq = msg.type === 'auth_ack' || msg.type === 'pong';
+            if (!isHighFreq) {
+              log('Socket received from daemon', 'debug', {
+                type: msg.type,
+                hasCorrelationId: !!msg.correlationId,
+                hasText: !!msg.text,
+                hasOnMessage: !!onMessage,
+              });
+            }
 
             // First, try to resolve by correlationId (new approach)
             if (msg.correlationId && pendingResolves.has(msg.correlationId)) {
@@ -145,11 +167,24 @@ export function createRelay(config: RelayConfig) {
             }
 
             // Handle incoming messages from Telegram
-            if (msg.type === 'message' && msg.text && onMessage) {
-              if (msg.messageID) lastMessageID = msg.messageID;
-              // If we receive a thread message, the thread exists - update state
-              if (msg.isThread) hasThread = true;
-              onMessage(msg.text, msg.isThread ?? false, msg.messageID);
+            if (msg.type === 'message') {
+              if (msg.text && onMessage) {
+                log('Dispatching Telegram message to onMessage', 'debug', {
+                  messageID: msg.messageID,
+                  isThread: msg.isThread ?? false,
+                });
+                if (msg.messageID) lastMessageID = msg.messageID;
+                // If we receive a thread message, the thread exists - update state
+                if (msg.isThread) hasThread = true;
+                onMessage(msg.text, msg.isThread ?? false, msg.messageID);
+              } else {
+                log('Received message from daemon but CANNOT dispatch', 'warn', {
+                  sessionID,
+                  hasText: !!msg.text,
+                  hasOnMessage: !!onMessage,
+                  textPreview: msg.text ? String(msg.text).slice(0, 120) : '<none>',
+                });
+              }
             }
 
             // Handle incoming commands from Telegram (/undo, /redo)
@@ -198,8 +233,11 @@ export function createRelay(config: RelayConfig) {
             if (msg.type === 'stop' && onStop) {
               onStop();
             }
-          } catch {
-            // Expected: Partial JSON lines during streaming, continue waiting for complete message
+          } catch (handlerErr) {
+            log('Error in socket message handler', 'error', {
+              type: msg?.type,
+              error: String(handlerErr),
+            });
           }
         }
       });

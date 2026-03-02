@@ -155,7 +155,10 @@ export function createMessageHandler(
       return;
     }
 
-    if (message.forum_topic_created || message.forum_topic_edited) {
+    // Suppress pure system messages about topic creation/editing.
+    // IMPORTANT: Telegram sometimes bundles forum_topic_edited with a real user message
+    // (e.g. when a topic was recently renamed). Only return early if there's no user text.
+    if ((message.forum_topic_created || message.forum_topic_edited) && !message.text) {
       try {
         await bot.deleteMessage({ chat_id: msgChatId, message_id: message.message_id });
       } catch (err) {
@@ -234,6 +237,7 @@ export function createMessageHandler(
       if (deleted > 0) saveState(state, statePath);
       await bot.sendMessage({
         chat_id: msgChatId,
+        ...(threadId ? { message_thread_id: threadId } : {}),
         text: `Cleaned up ${deleted} stale sessions and threads.`,
       });
       return;
@@ -670,6 +674,13 @@ export function createMessageHandler(
             text,
             isThread: true,
             messageID: message.message_id,
+          });
+          log('[Commands] Forwarded thread message to client', sent ? 'info' : 'warn', {
+            sid,
+            chatId: msgChatId,
+            threadId,
+            messageID: message.message_id,
+            sent,
           });
           if (!sent) {
             log(`[Daemon] Client ${sid} not connected, queueing message`, 'warn');

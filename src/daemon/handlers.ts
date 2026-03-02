@@ -336,11 +336,21 @@ export async function handleReact(
   if (!targetMessageID) return;
 
   try {
-    await bot.setMessageReaction({
+    const result = await bot.setMessageReaction({
       chat_id: session.chatId,
       message_id: targetMessageID,
       reaction: [{ type: 'emoji', emoji: msg.emoji }],
     });
+    
+    // If custom emoji failed, try fallback to fire
+    if (!result.ok && result.error_code === 400 && result.description?.includes('REACTION_INVALID')) {
+      log(`[Daemon] Custom emoji ${msg.emoji} not allowed, falling back to 🔥`, 'warn');
+      await bot.setMessageReaction({
+        chat_id: session.chatId,
+        message_id: targetMessageID,
+        reaction: [{ type: 'emoji', emoji: '🔥' }],
+      });
+    }
   } catch (err) {
     // Log at warn level to diagnose custom emoji issues
     log(`[Daemon] Failed to set reaction: ${err}`, 'warn', { emoji: msg.emoji, messageID: targetMessageID });
