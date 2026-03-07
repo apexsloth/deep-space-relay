@@ -59,6 +59,31 @@ describe('ConfigManager', () => {
     expect(content.chatId).toBe('val2');
     expect(content.ipcToken).toBe('val3');
   });
+
+  it('should deep-merge backend-specific config updates', async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        backend: 'codex-app-server',
+        codexAppServer: {
+          command: 'codex app-server',
+          websocketUrl: 'ws://127.0.0.1:9234',
+        },
+      })
+    );
+
+    const manager = new ConfigManager(configPath);
+    await manager.updateConfig({
+      codexAppServer: {
+        websocketUrl: 'ws://127.0.0.1:9235',
+      },
+    });
+
+    const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(content.backend).toBe('codex-app-server');
+    expect(content.codexAppServer.command).toBe('codex app-server');
+    expect(content.codexAppServer.websocketUrl).toBe('ws://127.0.0.1:9235');
+  });
 });
 
 describe('writeProjectConfig', () => {
@@ -116,5 +141,125 @@ describe('writeProjectConfig', () => {
 
     const config = loadConfig(projectDir);
     expect(config.chatId).toBe('-1009999999999');
+  });
+
+  it('should default backend to opencode when unset', () => {
+    writeProjectConfig(projectDir, { chatId: '-1009999999999' });
+
+    const config = loadConfig(projectDir);
+    expect(config.backend).toBe('opencode');
+  });
+
+  it('should round-trip backend selection and backend-specific settings', () => {
+    writeProjectConfig(projectDir, {
+      backend: 'codex-app-server',
+      chatId: '-1007777777777',
+      codexAppServer: {
+        transport: 'ws',
+        command: 'codex app-server',
+        websocketUrl: 'ws://127.0.0.1:9234',
+      },
+    });
+
+    const config = loadConfig(projectDir);
+    expect(config.backend).toBe('codex-app-server');
+    expect(config.chatId).toBe('-1007777777777');
+    expect(config.codexAppServer).toEqual({
+      transport: 'ws',
+      command: 'codex app-server',
+      websocketUrl: 'ws://127.0.0.1:9234',
+    });
+  });
+
+  it('should preserve existing backend-specific settings when updating chatId', () => {
+    writeProjectConfig(projectDir, {
+      backend: 'codex-app-server',
+      codexAppServer: {
+        transport: 'stdio',
+        command: 'codex app-server',
+        args: ['app-server'],
+        env: { SYSTEM_ONLY: '1' },
+      },
+    });
+
+    writeProjectConfig(projectDir, {
+      chatId: '-1003333333333',
+      codexAppServer: {
+        cwd: '/tmp/dsr-codex',
+        env: { PROJECT_ONLY: '1' },
+      },
+    });
+
+    const config = loadConfig(projectDir);
+    expect(config.chatId).toBe('-1003333333333');
+    expect(config.codexAppServer).toEqual({
+      transport: 'stdio',
+      command: 'codex app-server',
+      args: ['app-server'],
+      cwd: '/tmp/dsr-codex',
+      env: { SYSTEM_ONLY: '1', PROJECT_ONLY: '1' },
+    });
+  });
+
+  it('should merge system and project backend config', () => {
+    const systemRoot = join(tmpdir(), `dsr-system-${Date.now()}`);
+    const homeDir = join(systemRoot, 'home');
+    const systemConfigDir = join(homeDir, '.config/opencode/deep-space-relay');
+    const projectPath = join(systemRoot, 'project');
+    const projectConfigPath = join(projectPath, '.opencode/deep-space-relay');
+
+    mkdirSync(systemConfigDir, { recursive: true });
+    mkdirSync(projectConfigPath, { recursive: true });
+
+    writeFileSync(
+      join(systemConfigDir, 'config.json'),
+      JSON.stringify({
+        backend: 'codex-app-server',
+        chatId: '-100system',
+        codexAppServer: {
+          transport: 'stdio',
+          command: 'codex',
+          args: ['app-server'],
+          env: { SYSTEM_ONLY: '1' },
+        },
+      })
+    );
+    writeFileSync(join(systemConfigDir, 'token.json'), JSON.stringify({ token: 'system-token' }));
+    writeFileSync(
+      join(projectConfigPath, 'config.json'),
+      JSON.stringify({
+        chatId: '-100project',
+        codexAppServer: {
+          cwd: '/repo',
+          env: { PROJECT_ONLY: '1' },
+        },
+      })
+    );
+
+    const originalHome = process.env.HOME;
+    process.env.HOME = homeDir;
+    try {
+      const config = loadConfig(projectPath);
+      expect(config.token).toBe('system-token');
+      expect(config.backend).toBe('codex-app-server');
+      expect(config.chatId).toBe('-100project');
+      expect(config.codexAppServer).toEqual({
+        transport: 'stdio',
+        command: 'codex',
+        args: ['app-server'],
+        cwd: '/repo',
+        env: {
+          SYSTEM_ONLY: '1',
+          PROJECT_ONLY: '1',
+        },
+      });
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      rmSync(systemRoot, { recursive: true, force: true });
+    }
   });
 });

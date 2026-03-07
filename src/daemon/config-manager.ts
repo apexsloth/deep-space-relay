@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, renameSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import type { DSRConfig } from '../config';
+import { mergeDSRConfig, type DSRConfig } from '../config';
 import { log } from './logger';
 
 /**
@@ -75,10 +75,7 @@ export class ConfigManager {
     }
 
     // Deep merge (simple version for DSRConfig)
-    const newConfig = {
-      ...currentConfig,
-      ...updates,
-    };
+    const newConfig = mergeDSRConfig(currentConfig as Partial<DSRConfig>, updates);
 
     // Atomic write strategy: write to .tmp and rename
     const tmpPath = `${this.projectConfigPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;

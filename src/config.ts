@@ -56,10 +56,146 @@ export function getPIDPath(): string {
   return socketPath.replace('.sock', '.pid');
 }
 
+export type DSRBackend = 'opencode' | 'codex-app-server';
+
+export interface CodexAppServerConfig {
+  transport?: 'stdio' | 'ws';
+  command?: string;
+  args?: string[];
+  websocketUrl?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
 export interface DSRConfig {
+  backend?: DSRBackend;
   token?: string;
   chatId?: string;
   ipcToken?: string;
+  opencode?: Record<string, unknown>;
+  codexAppServer?: CodexAppServerConfig;
+}
+
+const DEFAULT_BACKEND: DSRBackend = 'opencode';
+
+function asConfigSection(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return { ...(value as Record<string, unknown>) };
+}
+
+function asStringMap(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value).filter((entry): entry is [string, string] => {
+    return typeof entry[1] === 'string';
+  });
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(entries);
+}
+
+function normalizeCodexAppServerConfig(value: unknown): CodexAppServerConfig | undefined {
+  const section = asConfigSection(value);
+  if (!section) {
+    return undefined;
+  }
+
+  const config: CodexAppServerConfig = {};
+  if (section.transport === 'stdio' || section.transport === 'ws') {
+    config.transport = section.transport;
+  }
+  if (typeof section.command === 'string') {
+    config.command = section.command;
+  }
+  if (Array.isArray(section.args)) {
+    config.args = section.args.filter((arg): arg is string => typeof arg === 'string');
+  }
+  if (typeof section.websocketUrl === 'string') {
+    config.websocketUrl = section.websocketUrl;
+  }
+  if (typeof section.cwd === 'string') {
+    config.cwd = section.cwd;
+  }
+  const env = asStringMap(section.env);
+  if (env) {
+    config.env = env;
+  }
+
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+
+function normalizeConfig(raw: Record<string, unknown>): Partial<DSRConfig> {
+  const config: Partial<DSRConfig> = {};
+
+  if (raw.backend === 'opencode' || raw.backend === 'codex-app-server') {
+    config.backend = raw.backend as DSRBackend;
+  }
+  if (typeof raw.token === 'string') {
+    config.token = raw.token;
+  }
+  if (typeof raw.chatId === 'string') {
+    config.chatId = raw.chatId;
+  }
+  if (typeof raw.ipcToken === 'string') {
+    config.ipcToken = raw.ipcToken;
+  }
+
+  const opencode = asConfigSection(raw.opencode);
+  if (opencode) {
+    config.opencode = opencode;
+  }
+
+  const codexAppServer = normalizeCodexAppServerConfig(raw.codexAppServer);
+  if (codexAppServer) {
+    config.codexAppServer = codexAppServer;
+  }
+
+  return config;
+}
+
+export function mergeDSRConfig(
+  base: Partial<DSRConfig>,
+  updates: Partial<DSRConfig>
+): Partial<DSRConfig> {
+  const merged = {
+    ...base,
+    ...updates,
+    ...(base.opencode || updates.opencode
+      ? {
+          opencode: {
+            ...(base.opencode ?? {}),
+            ...(updates.opencode ?? {}),
+          },
+        }
+      : {}),
+    ...(base.codexAppServer || updates.codexAppServer
+      ? {
+          codexAppServer: {
+            ...(base.codexAppServer ?? {}),
+            ...(updates.codexAppServer ?? {}),
+          },
+        }
+      : {}),
+  };
+
+  if (merged.codexAppServer?.env || base.codexAppServer?.env || updates.codexAppServer?.env) {
+    merged.codexAppServer = {
+      ...(merged.codexAppServer ?? {}),
+      env: {
+        ...(base.codexAppServer?.env ?? {}),
+        ...(updates.codexAppServer?.env ?? {}),
+      },
+    };
+  }
+
+  return merged;
 }
 
 /**
@@ -109,37 +245,26 @@ export function getSystemConfigDir(): string {
  * @returns Merged configuration
  */
 export function loadConfig(projectPath?: string): DSRConfig {
-  const config: DSRConfig = {};
+  let config: DSRConfig = { backend: DEFAULT_BACKEND };
 
   // Load system-level token (shared across all projects)
   const systemTokenPath = join(SYSTEM_CONFIG_DIR, 'token.json');
-  const systemToken = loadJsonFile(systemTokenPath);
-  if (systemToken.token && typeof systemToken.token === 'string') {
-    config.token = systemToken.token;
-  }
+  const systemToken = normalizeConfig(loadJsonFile(systemTokenPath));
+  config = mergeDSRConfig(config, systemToken);
 
   // Load system-level config (fallback chatId)
   const systemConfigPath = join(SYSTEM_CONFIG_DIR, 'config.json');
-  const systemConfig = loadJsonFile(systemConfigPath);
-  if (systemConfig.chatId && typeof systemConfig.chatId === 'string') {
-    config.chatId = systemConfig.chatId;
-  }
-  if (systemConfig.ipcToken && typeof systemConfig.ipcToken === 'string') {
-    config.ipcToken = systemConfig.ipcToken;
-  }
+  const systemConfig = normalizeConfig(loadJsonFile(systemConfigPath));
+  config = mergeDSRConfig(config, systemConfig);
 
   // Load project-level config (overrides chatId)
   if (projectPath) {
     const projectConfigPath = join(projectPath, PROJECT_CONFIG_SUBDIR, 'config.json');
-    const projectConfig = loadJsonFile(projectConfigPath);
-    if (projectConfig.chatId && typeof projectConfig.chatId === 'string') {
-      config.chatId = projectConfig.chatId;
-    }
-    if (projectConfig.ipcToken && typeof projectConfig.ipcToken === 'string') {
-      config.ipcToken = projectConfig.ipcToken;
-    }
+    const projectConfig = normalizeConfig(loadJsonFile(projectConfigPath));
+    config = mergeDSRConfig(config, projectConfig);
   }
 
+  config.backend = config.backend || DEFAULT_BACKEND;
   return config;
 }
 
@@ -161,7 +286,7 @@ export function writeProjectConfig(projectPath: string, updates: Partial<DSRConf
 
   // Load existing config and merge updates
   const existing = existsSync(configPath) ? loadJsonFile(configPath) : {};
-  const merged = { ...existing, ...updates };
+  const merged = mergeDSRConfig(existing, updates);
 
   writeFileSync(configPath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
 }
