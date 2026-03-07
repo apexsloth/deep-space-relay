@@ -10,6 +10,7 @@
 
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { mergeDSRConfig } from '../config';
 
 // ============================================================
 // CUSTOM ERRORS
@@ -755,8 +756,15 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     // but we ensure it exists just in case
     mkdirSync(dirname(SYSTEM_TOKEN_PATH), { recursive: true });
 
-    // Write project config (chatId)
-    writeFileSync(projectConfigPath, JSON.stringify({ chatId: String(chatId) }, null, 2));
+    // Preserve any existing backend settings when setup updates chat routing.
+    const existingProjectConfig =
+      existsSync(projectConfigPath) && readFileSync(projectConfigPath, 'utf-8').trim()
+        ? JSON.parse(readFileSync(projectConfigPath, 'utf-8'))
+        : {};
+    const mergedProjectConfig = mergeDSRConfig(existingProjectConfig, {
+      chatId: String(chatId),
+    });
+    writeFileSync(projectConfigPath, JSON.stringify(mergedProjectConfig, null, 2));
 
     // Write system token (shared across projects) with secure permissions
     writeFileSync(SYSTEM_TOKEN_PATH, JSON.stringify({ token }, null, 2), { mode: 0o600 });
