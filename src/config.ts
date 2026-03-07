@@ -7,8 +7,11 @@ import { SECURE_DIR_MODE } from './constants';
 // ============================================================
 
 // Config paths (uses hyphen for consistency with project name)
-const SYSTEM_CONFIG_DIR = join(process.env.HOME || '', '.config/opencode/deep-space-relay');
 const PROJECT_CONFIG_SUBDIR = '.opencode/deep-space-relay';
+
+function resolveSystemConfigDir(): string {
+  return join(process.env.HOME || '', '.config/opencode/deep-space-relay');
+}
 
 /**
  * Get the secure socket path (user-specific, not world-readable)
@@ -233,7 +236,7 @@ export function getProjectConfigDir(projectPath: string): string {
  * Get the system config directory path
  */
 export function getSystemConfigDir(): string {
-  return SYSTEM_CONFIG_DIR;
+  return resolveSystemConfigDir();
 }
 
 /**
@@ -248,12 +251,14 @@ export function loadConfig(projectPath?: string): DSRConfig {
   let config: DSRConfig = { backend: DEFAULT_BACKEND };
 
   // Load system-level token (shared across all projects)
-  const systemTokenPath = join(SYSTEM_CONFIG_DIR, 'token.json');
+  const systemConfigDir = resolveSystemConfigDir();
+
+  const systemTokenPath = join(systemConfigDir, 'token.json');
   const systemToken = normalizeConfig(loadJsonFile(systemTokenPath));
   config = mergeDSRConfig(config, systemToken);
 
   // Load system-level config (fallback chatId)
-  const systemConfigPath = join(SYSTEM_CONFIG_DIR, 'config.json');
+  const systemConfigPath = join(systemConfigDir, 'config.json');
   const systemConfig = normalizeConfig(loadJsonFile(systemConfigPath));
   config = mergeDSRConfig(config, systemConfig);
 

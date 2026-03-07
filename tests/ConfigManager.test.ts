@@ -66,8 +66,10 @@ describe('ConfigManager', () => {
       JSON.stringify({
         backend: 'codex-app-server',
         codexAppServer: {
-          command: 'codex app-server',
-          websocketUrl: 'ws://127.0.0.1:9234',
+          transport: 'stdio',
+          command: 'codex',
+          args: ['app-server'],
+          env: { SYSTEM_ONLY: '1' },
         },
       })
     );
@@ -75,14 +77,18 @@ describe('ConfigManager', () => {
     const manager = new ConfigManager(configPath);
     await manager.updateConfig({
       codexAppServer: {
-        websocketUrl: 'ws://127.0.0.1:9235',
+        cwd: '/tmp/project',
+        env: { PROJECT_ONLY: '1' },
       },
     });
 
     const content = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(content.backend).toBe('codex-app-server');
-    expect(content.codexAppServer.command).toBe('codex app-server');
-    expect(content.codexAppServer.websocketUrl).toBe('ws://127.0.0.1:9235');
+    expect(content.codexAppServer.transport).toBe('stdio');
+    expect(content.codexAppServer.command).toBe('codex');
+    expect(content.codexAppServer.args).toEqual(['app-server']);
+    expect(content.codexAppServer.cwd).toBe('/tmp/project');
+    expect(content.codexAppServer.env).toEqual({ SYSTEM_ONLY: '1', PROJECT_ONLY: '1' });
   });
 });
 
