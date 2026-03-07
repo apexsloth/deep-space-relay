@@ -1,6 +1,6 @@
 import { tool } from '@opencode-ai/plugin';
 import type { Relay } from './relay/core';
-import type { LogFn, PluginContext } from './types';
+import type { LogFn, ToolRuntime } from './types';
 import { writeProjectConfig } from './config';
 
 // Build fingerprint — bump this manually before building to verify the running plugin version
@@ -14,7 +14,7 @@ export function createTools(
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
   relays: Map<string, Relay>,
-  client: PluginContext['client'],
+  client: ToolRuntime,
   directory: string
 ) {
   return {

@@ -1,5 +1,5 @@
 import type { Relay } from './relay/core';
-import type { LogFn, PluginContext } from './types';
+import type { LogFn, PermissionRuntime } from './types';
 
 // ============================================================
 // PERMISSION BRIDGE
@@ -33,7 +33,7 @@ export function createPermissionHandler(
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
   relays: Map<string, Relay>,
-  client: PluginContext['client'],
+  client: PermissionRuntime,
   directory: string
 ) {
   return async (input: PermissionInput, output: PermissionOutput): Promise<void> => {
@@ -87,7 +87,7 @@ export function createPermissionHandler(
 async function forwardPermissionToTelegram(
   input: PermissionInput,
   relay: Relay,
-  client: PluginContext['client'],
+  client: PermissionRuntime,
   directory: string,
   log: LogFn
 ): Promise<void> {
@@ -111,7 +111,7 @@ async function forwardPermissionToTelegram(
 async function handleQuestionPermission(
   input: PermissionInput,
   relay: Relay,
-  client: PluginContext['client'],
+  client: PermissionRuntime,
   directory: string,
   log: LogFn,
   options: string[]
@@ -159,7 +159,7 @@ async function handleQuestionPermission(
 async function handleToolPermission(
   input: PermissionInput,
   relay: Relay,
-  client: PluginContext['client'],
+  client: PermissionRuntime,
   directory: string,
   log: LogFn
 ): Promise<void> {

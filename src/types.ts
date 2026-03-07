@@ -83,6 +83,70 @@ export type LogFn = (
   extra?: Record<string, unknown>
 ) => void;
 
+export interface RuntimeTextPart {
+  type: string;
+  text?: string;
+}
+
+export interface RuntimeSessionMessage {
+  info?: Record<string, unknown>;
+  parts?: RuntimeTextPart[];
+}
+
+export interface RuntimeSessionQuery {
+  directory: string;
+}
+
+export interface RuntimeSessionPath {
+  id: string;
+}
+
+export interface RuntimeSessionGetResult {
+  data?: {
+    title?: string;
+  };
+}
+
+export interface RuntimeSessionMessagesResult {
+  data?: RuntimeSessionMessage[];
+}
+
+export interface RuntimeSessionPromptBody {
+  parts: RuntimeTextPart[];
+}
+
+export interface RuntimeSessionAPI {
+  get: (options: {
+    path: RuntimeSessionPath;
+    query: RuntimeSessionQuery;
+  }) => Promise<RuntimeSessionGetResult>;
+  prompt: (options: {
+    path: RuntimeSessionPath;
+    body: RuntimeSessionPromptBody;
+    query: RuntimeSessionQuery;
+  }) => Promise<unknown>;
+  messages: (options: {
+    path: RuntimeSessionPath;
+    query: RuntimeSessionQuery;
+  }) => Promise<RuntimeSessionMessagesResult>;
+}
+
+export interface EventRuntime {
+  session: Pick<RuntimeSessionAPI, 'get' | 'prompt' | 'messages'>;
+}
+
+export interface ToolRuntime {
+  session: Pick<RuntimeSessionAPI, 'get'>;
+}
+
+export interface PermissionRuntime {
+  postSessionIdPermissionsPermissionId: (options: {
+    path: { id: string; permissionID: string };
+    body?: { response: string };
+    query?: { directory?: string };
+  }) => Promise<{ data?: boolean }>;
+}
+
 // Daemon types
 export interface SessionInfo {
   sessionID: string;

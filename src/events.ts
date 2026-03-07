@@ -1,5 +1,5 @@
 import type { Relay } from './relay/core';
-import type { LogFn, PluginContext } from './types';
+import type { EventRuntime, LogFn } from './types';
 import {
   IDLE_DEBOUNCE_MS,
   ABORT_GRACE_WINDOW_MS,
@@ -74,7 +74,7 @@ function markAbortDetected(sessionId: string): void {
 export function createEventHandler(
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
-  client: PluginContext['client'],
+  client: EventRuntime,
   directory: string,
   projectName: string
 ) {
@@ -176,7 +176,7 @@ async function handleSessionCreated(
   event: { type: string },
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
-  client: PluginContext['client'],
+  client: EventRuntime,
   directory: string,
   projectName: string,
   registeringSessions: Set<string>
@@ -253,7 +253,7 @@ async function handleSessionIdle(
   info: Record<string, unknown> | undefined,
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
-  client: PluginContext['client'],
+  client: EventRuntime,
   directory: string,
   registeringSessions: Set<string>
 ) {
@@ -300,7 +300,7 @@ async function handleMessageUpdated(
   info: Record<string, unknown> | undefined,
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
-  client: PluginContext['client'],
+  client: EventRuntime,
   directory: string,
   registeringSessions: Set<string>
 ) {
@@ -376,7 +376,7 @@ async function handleSessionCompacted(
   sessionId: string | undefined,
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
-  client: PluginContext['client'],
+  client: EventRuntime,
   directory: string
 ) {
   log('session.compacted received', 'info', { sessionId });
@@ -439,7 +439,7 @@ async function handleSessionStatus(
   props: Record<string, unknown> | undefined,
   getRelay: (sessionId: string) => Relay,
   log: LogFn,
-  client: PluginContext['client'],
+  client: EventRuntime,
   directory: string
 ) {
   const status = props?.status as { type: string } | undefined;
