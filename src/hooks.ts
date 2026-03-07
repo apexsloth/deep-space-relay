@@ -1,6 +1,3 @@
-import type { Relay } from './relay/core';
-import type { LogFn, PluginContext } from './types';
-
 // ============================================================
 // HOOKS
 // ============================================================

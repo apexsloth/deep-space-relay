@@ -1,6 +1,6 @@
 ---
 id: dsr-6ux2
-status: open
+status: closed
 deps: [dsr-youi]
 links: []
 created: 2026-03-07T17:58:08Z

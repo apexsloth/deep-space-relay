@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { createPermissionHandler } from '../src/permissions';
 import type { Relay } from '../src/relay/core';
-import type { LogFn, PluginContext } from '../src/types';
+import type { LogFn, PermissionRuntime } from '../src/types';
 
 // Helper to create a mock relay
 function createMockRelay(overrides: Partial<Relay> = {}): Relay {
@@ -52,18 +52,8 @@ function createMockRelay(overrides: Partial<Relay> = {}): Relay {
 // Helper to create a mock client
 function createMockClient() {
   return {
-    app: {
-      log: mock(() => Promise.resolve()),
-    },
-    session: {
-      prompt: mock(() => Promise.resolve({})),
-      abort: mock(() => Promise.resolve({})),
-      get: mock(() => Promise.resolve({ data: { title: 'Test' } })),
-      messages: mock(() => Promise.resolve({ data: [] })),
-      list: mock(() => Promise.resolve({ data: [] })),
-    },
     postSessionIdPermissionsPermissionId: mock(() => Promise.resolve({ data: true })),
-  } as unknown as PluginContext['client'];
+  } as PermissionRuntime;
 }
 
 describe('Permission Handler', () => {
